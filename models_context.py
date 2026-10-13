@@ -51,14 +51,7 @@ class ContextModel():
     def update(self, c_t: int):
         raise NotImplementedError
 
-    @classmethod
-    def from_state(cls, hyp_param: dict, state: dict):
-        raise NotImplementedError
 
-    def to_state(self) -> dict:
-            raise NotImplementedError
-
-    
 
 
 class CRP():
@@ -99,29 +92,6 @@ class CRP():
         Sample from the CRP prior
         """
         return D.Categorical(probs=self.probs).sample().item()
-
-    def to_state(self):
-        """
-        Minimal state representation needed to reconstruct the CRP object
-        """
-        return {"counts": self.counts}
-
-    @classmethod
-    def from_state(cls, hyp_alpha, state):
-        """
-        Reconstruct a CRP object from its minimal state representation
-        """
-        obj = cls(hyp_alpha=hyp_alpha)
-        counts : torch.Tensor = state["counts"]
-        obj.counts = counts.clone()
-        
-        if counts.any():
-            # Returns the index of the rightmost non-zero element in the count vector, or zero if all elements are 0
-            obj.n_active_contexts = counts.nonzero(as_tuple=True)[0].max().item() + 1
-        else: 
-            0
-        
-        return obj
 
 
 class jCRP(ContextModel):
@@ -215,29 +185,6 @@ class jCRP(ContextModel):
             self.prev_c = c_t
 
             self.fill_context_hypotheses()  # Refill the context hypotheses after the update
-
-    def to_state(self):
-        """
-        Minimal state needed to reconstruct the object.
-        """
-        return {
-            "crp_state": self.CRP.to_state(),
-            "prev_c":    int(self.prev_c),
-        }
-
-    @classmethod
-    def from_state(cls, hyp_param: dict, state: dict):
-        """
-        Reconstruct a jCRP object from its minimal state representation.
-        """
-        jcrp = cls(**hyp_param)
-
-        jcrp.CRP = CRP.from_state(jcrp.hyp_alpha, state["crp_state"])
-        jcrp.prev_c = state["prev_c"]
-
-        jcrp.fill_context_hypotheses()  # Refill the context hypotheses after restoring the state
-
-        return jcrp
 
 
 class CjCRP(ContextModel):
@@ -337,33 +284,3 @@ class CjCRP(ContextModel):
             self.prev_c_r = c_r_t
 
             self.fill_context_hypotheses()  # Refill the context hypotheses after the update
-
-    def to_state(self):
-        """
-        Minimal state needed to reconstruct the object. This is a combination of counts and the previous state for each CRP.
-        """
-        return {
-            "crp_o_state":  self.CRP_o.to_state(),
-            "crp_r_state":  self.CRP_r.to_state(),
-            "prev_c_o":     int(self.prev_c_o),
-            "prev_c_r":     int(self.prev_c_r)
-        }
-
-
-    
-    @classmethod
-    def from_state(cls, hyp_param:dict, state:dict):
-        """
-        Reconstruct a cjCRP object from its minimal state representation
-        """
-        cjcrp = cls(**hyp_param)
-        
-        cjcrp.CRP_o = CRP.from_state(cjcrp.hyp_alpha_o, state["crp_o_state"])
-        cjcrp.CRP_r = CRP.from_state(cjcrp.hyp_alpha_r, state["crp_r_state"])
-
-        cjcrp.prev_c_o = state["prev_c_o"]
-        cjcrp.prev_c_r = state["prev_c_r"]
-
-        cjcrp.fill_context_hypotheses()  # Refill the context hypotheses after restoring the state
-
-        return cjcrp

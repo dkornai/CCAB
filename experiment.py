@@ -1,3 +1,6 @@
+import pickle
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
 
 import torch
@@ -276,8 +279,81 @@ class CombinedHistory():
         subject_actions_probs = np.array(self.subject_history.p_action)
 
         output = np.zeros(len(optimal_actions))
-        for t in range(len(optimal_actions)): 
+        for t in range(len(optimal_actions)):
             output[t] = subject_actions_probs[t][optimal_actions[t]]
 
         return output
+
+
+def run_replicate(
+    env: ExperimentalEnv,
+    agent_params: dict,
+    N: int,
+    schedule: list[tuple[int, int, int]],
+    seed: int | None = None,
+    print_level: int = 0
+    ) -> CombinedHistory:
+    """
+    Run a single replicate of the experiment with a freshly initialised ideal observer.
+
+    :param ExperimentalEnv env: environment to run the trials in
+    :param dict agent_params: parameters of the ideal observer (IdealObsParams)
+    :param int N: number of particles
+    :param list schedule: blocks of trials, run in order, each of the form (n_trials, c_o, c_r)
+    :param int seed: seed for torch's RNG, or None to leave the RNG untouched
+    """
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    exp_history = ExperimentHistory()
+    sub_history = IOPFSubjectHistory()
+    subject = IdealObsPF(N=N, hyp_params=agent_params)
+
+    for n_trials, c_o, c_r in schedule:
+        env.repeat_trials(subject, experiment_history=exp_history, subject_history=sub_history, N=n_trials, c_o=c_o, c_r=c_r, print_level=print_level)
+
+    return CombinedHistory(experiment_history=exp_history, subject_history=sub_history)
+
+
+def _init_replicate_worker():
+    """
+    Each worker runs a single replicate at a time, so disable within worker multithreading to prevent oversubscription
+    """
+    torch.set_num_threads(1)
+    torch.set_grad_enabled(False)
+
+
+def _run_replicate_pickled(*args) -> bytes:
+    """
+    Run a replicate and return the pickled result. \\
+    Plain pickling avoids torch.multiprocessing moving every tensor in the history into its own shared memory segment, which is slow.
+    """
+    return pickle.dumps(run_replicate(*args))
+
+
+def run_replicates(
+    env: ExperimentalEnv,
+    agent_params: dict,
+    N: int,
+    schedule: list[tuple[int, int, int]],
+    n_replicates: int,
+    n_workers: int,
+    seed: int | None = None
+    ) -> list[CombinedHistory]:
+    """
+    Run independent replicates of the experiment in parallel, with one replicate per worker process at a time.
+
+    :param int n_replicates: number of replicates to run
+    :param int n_workers: number of worker processes
+    :param int seed: if given, replicate i is seeded with seed + i (reproducible), otherwise each worker process is randomly seeded
+    :return list[CombinedHistory]: histories in replicate order
+    """
+    assert 1 <= n_workers <= mp.cpu_count(), "Number of workers is limited to the number of hardware threads"
+
+    seeds = [None if seed is None else seed + i for i in range(n_replicates)]
+
+    # 'spawn' rather than 'fork', as forking a process with live torch threads (e.g. from a notebook) can deadlock
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=mp.get_context("spawn"), initializer=_init_replicate_worker) as pool:
+        futures = [pool.submit(_run_replicate_pickled, env, agent_params, N, schedule, s) for s in seeds]
+        return [pickle.loads(f.result()) for f in futures]
     

@@ -19,21 +19,11 @@ class SuffStats:
         """
         raise NotImplementedError("update method must be implemented by subclass")
 
-    def to_state(self) -> dict:
-        raise NotImplementedError
-
-    @classmethod
-    def from_state(cls, state: dict):
-        raise NotImplementedError
-
 
 class ConjugateModel:
     """
     Base class for a conjugate model. This should be extended for specific likelihood-prior pairs.
     """
-
-    # subclasses MUST set this to specific sufficient statistics class, e.g. SuffStatsGaussian
-    SUFFSTATS_CLS = None  # type: type[SuffStats]
 
     def __init__(self):
         pass
@@ -67,35 +57,6 @@ class ConjugateModel:
         Return the predictive likelihood of a new observation x.
         """
         raise NotImplementedError("pred_lh method must be implemented by subclass")
-
-
-    # Extra methods for serialization and reconstruction of the model state during resampling of particles in a particle filter.
-    def to_state(self) -> dict:
-        """
-        For all conjugate models, the minimal state representation needed to reconstruct the object is \\
-        just the sufficient statistics, since the posterior can be fully reconstructed from the sufficient \\
-        statistics and the prior parameters (which are fixed and known).
-        """
-        return {"suffstats": self.suffstats.to_state()}
-
-    @classmethod
-    def from_state(cls, hyp_params: dict, state: dict):
-        """
-        Reconstruct a conjugate model object from its minimal state representation, \\
-        which is just the sufficient statistics and the prior parameters.
-        """
-        # check that subclass has set SUFFSTATS_CLS
-        if cls.SUFFSTATS_CLS is None:
-            raise TypeError(f"{cls.__name__} must set SUFFSTATS_CLS")
-
-        # Re-init the object with the prior parameters
-        obj = cls(**hyp_params)
-        # Then reconstruct the sufficient statistics from the state
-        obj.suffstats = cls.SUFFSTATS_CLS.from_state(state["suffstats"])
-        # Finally, update the posterior parameters based on the sufficient statistics
-        obj._update_posterior()
-
-        return obj
 
 
 
@@ -146,32 +107,8 @@ class SuffStatsGaussian(SuffStats):
         mu = self.mean
         return self.sum_xx - self.n * torch.outer(mu, mu)
 
-    def to_state(self):
-        """
-        Minimal state representation needed to reconstruct the sufficient statistics.
-        """
-        return {
-            "n":      float(self.n),
-            "sum_x":  self.sum_x,
-            "sum_xx": self.sum_xx,
-        }
-
-    @classmethod
-    def from_state(cls, state):
-        """
-        Reconstruct sufficient statistics from its minimal state representation.
-        """
-        d = int(state["sum_x"].numel())
-        obj = cls(d)
-        obj.n = float(state["n"])
-        obj.sum_x = state["sum_x"].clone()
-        obj.sum_xx = state["sum_xx"].clone()
-        return obj
-
 
 class ConjugateGaussianInvWish(ConjugateModel):
-    SUFFSTATS_CLS = SuffStatsGaussian
-
     def __init__(self, mu0, kappa0, nu0, Lambda0):
         """
         Conjugate Gaussian-Inverse Wishart distribution for a posterior over a multivariate Gaussian with unknown mean & covariance.
@@ -345,8 +282,6 @@ class ConjugateGaussianInvGam(ConjugateModel):
             + (kappa_0 n)/(2 kappa_n)
               ||x_bar - mu_0||^2
     """
-
-    SUFFSTATS_CLS = SuffStatsGaussian
 
     def __init__(self, mu0: torch.Tensor, kappa0: float, alpha0: float, beta0: float):
         """
@@ -529,26 +464,6 @@ class SuffStatsRewards(SuffStats):
         """
         return float((self.succ + self.fail).sum().item())
 
-    def to_state(self):
-        """
-        Minimal state representation needed to reconstruct the sufficient statistics
-        """
-        return {
-            "succ": self.succ, 
-            "fail": self.fail
-            }
-
-    @classmethod
-    def from_state(cls, state):
-        """
-        Reconstruct sufficient statistics from its minimal state representation
-        """
-        K = int(state["succ"].numel())
-        obj = cls(K)
-        obj.succ = state["succ"].clone()
-        obj.fail = state["fail"].clone()
-        return obj
-
 
 class ConjugateBernoulli(ConjugateModel):
     """
@@ -557,8 +472,6 @@ class ConjugateBernoulli(ConjugateModel):
         p_a ~ Beta(alpha0[a], beta0[a])
     independently for each action a in {0, ..., K-1}.
     """
-
-    SUFFSTATS_CLS = SuffStatsRewards
 
     def __init__(self, alpha0, beta0):
         """
@@ -664,8 +577,6 @@ class ConjugateOptimalArm(ConjugateModel):
             * (rho_c / rho_i) ** succ[k]
             * ((1-rho_c) / (1-rho_i)) ** fail[k].
     """
-
-    SUFFSTATS_CLS = SuffStatsRewards
 
     def __init__(self, rho_c, rho_i, beta0):
         """

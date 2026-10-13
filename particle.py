@@ -1,5 +1,3 @@
-from typing import TypedDict
-
 import torch
 import numpy as np
 import torch.distributions as D
@@ -8,20 +6,6 @@ from models_obs_rew import ConjugateModel
 from models_context import ContextModel
 from subject import IdealObsParams
 from utils_sample import normalise, bern_sample, cat_sample, cat2D_sample
-
-
-"""
-Particle = IdealObsParams + ParticleState
-"""
-class ParticleState(TypedDict):
-    """
-    TypedDict for the state of a Particle object.
-    """
-    context_model_state: dict
-    obs_model_states: list[list[dict]]
-    rew_model_states: list[list[dict]]
-    log_weight: float
-
 
 
 class Particle():
@@ -63,65 +47,6 @@ class Particle():
 
         # Particle weight for resampling
         self.log_weight = 0.0
-
-
-    def to_state(self):
-        """
-        Minimal state representation needed to reconstruct the Particle object. \\
-        This consists of the state for the context model, \\
-        states of the observation and reward models (sufficent statistics), and the particle weight. 
-        """
-        return {
-            "context_model_state":  self.context_model.to_state(),
-
-            "obs_model_states":     [[m.to_state() for m in self.obs_models[i]] for i in range(self.n_states)],
-            "rew_model_states":     [[m.to_state() for m in self.rew_models[i]] for i in range(self.n_states)],
-
-            "log_weight":     float(self.log_weight),
-        }
-
-    @classmethod
-    def from_state(cls, particle_params: IdealObsParams, state : ParticleState):
-        """
-        Reconstruct the mutable state of a particle from the type-hyperparameters and the states of the subcomponents.\\
-        Much much faster than deepcopy, and allows the particle to be transferred between processes with minimal overhead
-        """
-        # 0) Start by reconstructing the particle with the type and hyperparameters
-        p = cls(particle_params)        
-
-
-        # Read out key types, hyperparameters, and states for simpler syntax below
-        CtxModel     = p.type_context
-        ObsModel     = p.type_obs
-        RewModel     = p.type_rew
-
-        hyp_context : dict = p.hyp_context
-        hyp_obs     : dict = p.hyp_obs
-        hyp_rew     : dict = p.hyp_rew
-
-        context_state : dict             = state["context_model_state"]
-        obs_states    : list[list[dict]] = state["obs_model_states"]
-        rew_states    : list[list[dict]] = state["rew_model_states"]
-
-        # 1) Restore context model
-        p.context_model = CtxModel.from_state(hyp_context, state=context_state)
-
-        # 2) Restore Observation Models
-        p.obs_models = [[] for _ in p.state_space]
-        for i in range(p.n_states):
-            for m_state in obs_states[i]:
-                p.obs_models[i].append(ObsModel.from_state(hyp_obs, state=m_state))
-
-        # 3) Restore Reward Models
-        p.rew_models = [[] for _ in p.state_space]
-        for i in range(p.n_states):
-            for m_state in rew_states[i]:
-                p.rew_models[i].append(RewModel.from_state(hyp_rew, state=m_state))
-
-        # 4) Restore weight
-        p.log_weight = float(state["log_weight"])
-
-        return p
 
 
     def before_action(self, o_t: torch.Tensor):
