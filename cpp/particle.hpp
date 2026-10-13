@@ -101,7 +101,6 @@ public:
     std::unique_ptr<ConjugateRewModel> novel_rew_model;
 
     // Particle weight for resampling
-    // Differs from Python: float64, where Python accumulates it as a float32 tensor
     double log_weight = 0.0;
 
     // Temporary belief computed in before_action, shape (n_states, n_hypotheses)

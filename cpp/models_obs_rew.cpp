@@ -15,7 +15,7 @@ void require(bool condition, const std::string& message) {
     }
 }
 
-/// Lower Cholesky factor of A. Python: torch.linalg.cholesky, which also raises if A is not positive definite
+/// Lower Cholesky factor of A. Python: np.linalg.cholesky, which also raises if A is not positive definite
 MatrixXd cholesky(const MatrixXd& A) {
     Eigen::LLT<MatrixXd> llt(A);
     if (llt.info() != Eigen::Success) {
@@ -290,7 +290,7 @@ ConjugateOptimalArm::ConjugateOptimalArm(double rho_c, double rho_i, const Vecto
     require(0.0 < rho_i && rho_i < 1.0, "rho_i must be in (0, 1), got " + std::to_string(rho_i));
     require(K >= 2, "beta0 must contain at least two arms");
     require((beta0.array() > 0).all(), "all beta0 entries must be > 0 to avoid degenerate posteriors");
-    // Differs from Python: Python checks for exact equality, which float32 inputs that sum to 1 in float32 may not satisfy in float64
+    // Up to rounding, e.g. 0.1 + 0.2 + 0.7 != 1.0 in floating point (as in Python)
     require(std::abs(beta0.sum() - 1.0) < 1e-6, "beta0 must sum to 1.0");
 
     // These are constant across all posterior updates.

@@ -1,12 +1,10 @@
 from copy import deepcopy
 
 import numpy as np
-import torch
-import torch.distributions as D
 
 from particle import Particle
 from subject import Subject, IdealObsParams
-from utils_sample import bern_sample
+from utils_sample import rng, bern_sample, cat_sample
 
 
 class IdealObsPF(Subject):
@@ -21,25 +19,26 @@ class IdealObsPF(Subject):
         self.particles = [Particle(hyp_params) for _ in range(N)]
 
         # Initalise extra data structures that are tracked during particle filtering
-        self.log_weights    = torch.zeros(N, dtype=torch.float64)
-        self.vec_s_t        = torch.zeros(N, dtype=torch.long)
-        self.vec_c_o_t      = torch.zeros(N, dtype=torch.long)
-        self.vec_c_r_t      = torch.zeros(N, dtype=torch.long)
-        self.vec_j_t        = torch.zeros(N, dtype=torch.long)
+        self.log_weights    = np.zeros(N)
+        self.vec_s_t        = np.zeros(N, dtype=int)
+        self.vec_c_o_t      = np.zeros(N, dtype=int)
+        self.vec_c_r_t      = np.zeros(N, dtype=int)
+        self.vec_j_t        = np.zeros(N, dtype=int)
 
     @property
     def weights(self):
         """
         Weights of each particle, summing to 1
         """
-        return torch.exp(self.log_weights - torch.logsumexp(self.log_weights, dim=0))
+        # exp(log_weights - logsumexp(log_weights))
+        max_log_weight = np.max(self.log_weights)
+        logsumexp = max_log_weight + np.log(np.sum(np.exp(self.log_weights - max_log_weight)))
+        return np.exp(self.log_weights - logsumexp)
 
-    def before_action(self, o_t: np.ndarray | torch.Tensor):
+    def before_action(self, o_t: np.ndarray):
         """
         Process the incoming observation o_t
         """
-        o_t = torch.as_tensor(o_t, dtype=torch.float32) # the environment provides numpy observations, the particles compute in float32 torch
-
         for particle in self.particles:
             particle.before_action(o_t)
 
@@ -48,22 +47,20 @@ class IdealObsPF(Subject):
         Select an action a_t
         """
         # Each particle samples an action
-        actions = torch.tensor([particle.sample_action() for particle in self.particles], dtype=torch.long)
+        actions = np.array([particle.sample_action() for particle in self.particles], dtype=int)
 
         self._last_actions = actions # store for eval
 
         # Pick a particle from which the action is emitted
-        selected_particle = D.Categorical(probs=self.weights).sample().item()
-        selected_action = int(actions[selected_particle].item())
+        selected_particle = cat_sample(self.weights)
+        selected_action = int(actions[selected_particle])
 
         return selected_action
 
-    def after_action(self, o_t: np.ndarray | torch.Tensor, a_t: int, r_t: float):
+    def after_action(self, o_t: np.ndarray, a_t: int, r_t: float):
         """
         Process the resulting o_t, a_t, r_t emissions at time t
         """
-        o_t = torch.as_tensor(o_t, dtype=torch.float32) # the environment provides numpy observations, the particles compute in float32 torch
-
         # Each particle conducts inference on the latent state and contexts, and updates internal parameters
         for i, particle in enumerate(self.particles):
             s_t, c_o_t, c_r_t, j_t = particle.after_action(o_t, int(a_t), float(r_t))
@@ -82,7 +79,7 @@ class IdealObsPF(Subject):
         Resample particles according to weights
         """
         # sample N ancestor indices using current log weights
-        ancestors = D.Categorical(logits=self.log_weights).sample((self.N,)).tolist()
+        ancestors = rng.choice(self.N, size=self.N, p=self.weights).tolist()
 
         # The first descendant of an ancestor reuses the ancestor object, further descendants get independent copies
         used = set()
@@ -98,18 +95,17 @@ class IdealObsPF(Subject):
         # Reset weights after resampling
         for particle in self.particles:
             particle.log_weight = 0.0
-        self.log_weights.zero_()
+        self.log_weights[:] = 0.0
 
     @property
     def p_action(self) -> np.ndarray:
         """
         Weighted action probabilities at the current time step, inferred from the particles' last sampled actions.
         """
-        w = self.weights.to(torch.float64)  # [N], sums to 1
+        w = self.weights  # [N], sums to 1
 
-        acts = self._last_actions.to(torch.long)  # [N]
-        p_actions = torch.bincount(acts, weights=w, minlength=4).to(torch.float)
-        p_actions = torch.round(p_actions, decimals=2).detach().numpy()
+        p_actions = np.bincount(self._last_actions, weights=w, minlength=4)
+        p_actions = np.round(p_actions, decimals=2)
 
         return p_actions
 
@@ -118,11 +114,11 @@ class IdealObsPF(Subject):
         """
         Probabilities of latent states at the current time step, inferred from the particles' latent state variable vec_s_t and weighted by particle weights.
         """
-        w = self.weights.to(torch.float64)  # [N], sums to 1
+        w = self.weights  # [N], sums to 1
 
         # 1) inferred latent state distribution P(s_t)
-        p_s = torch.bincount(self.vec_s_t.to(torch.long), weights=w, minlength=2).to(torch.float) # vec_s_t is [N] with entries 0/1
-        p_s = torch.round(p_s, decimals=2).detach().numpy()
+        p_s = np.bincount(self.vec_s_t, weights=w, minlength=2) # vec_s_t is [N] with entries 0/1
+        p_s = np.round(p_s, decimals=2)
 
         return p_s
 
@@ -131,10 +127,10 @@ class IdealObsPF(Subject):
         """
         Probability of a jump at the current time step, inferred from the particles' jump variable vec_j_t and weighted by particle weights.
         """
-        w = self.weights.to(torch.float64)  # [N], sums to 1
+        w = self.weights  # [N], sums to 1
 
         # 3) inferred jump probability P(j_t == 1)
-        p_jump = w[self.vec_j_t.to(torch.long) == 1].sum().to(torch.float) # vec_j_t is [N] with entries 0/1
-        p_jump = float(torch.round(p_jump, decimals=2).detach().numpy())
+        p_jump = w[self.vec_j_t == 1].sum() # vec_j_t is [N] with entries 0/1
+        p_jump = float(np.round(p_jump, decimals=2))
 
         return p_jump

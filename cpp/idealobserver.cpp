@@ -8,8 +8,7 @@ namespace pf {
 
 namespace {
 
-/// Python: torch.round(x, decimals=2)
-/// Differs from Python: rounds a float64 value, where Python rounds the float32 conversion
+/// Python: np.round(x, decimals=2)
 double round2(double x) {
     return std::nearbyint(x * 100.0) / 100.0;
 }
@@ -77,7 +76,7 @@ void IdealObsPF::after_action(const VectorXd& o_t, int a_t, double r_t) {
 }
 
 void IdealObsPF::resample() {
-    // sample N ancestor indices using current log weights (Python: Categorical(logits=log_weights))
+    // sample N ancestor indices using current log weights (Python: rng.choice with the normalised weights)
     const VectorXd unnorm_weights = (log_weights.array() - log_weights.maxCoeff()).exp();
     const std::vector<int> ancestors = cat_sample_n(unnorm_weights, N, rng);
 
@@ -112,7 +111,6 @@ VectorXd IdealObsPF::p_action() const {
     const VectorXd w = weights();  // [N], sums to 1
 
     // Python: bincount(last_actions, weights=w, minlength=4)
-    // Differs from Python: returned as float64, where Python returns float32
     VectorXd p_actions = VectorXd::Zero(std::max(4, last_actions.maxCoeff() + 1));
     for (int i = 0; i < N; ++i) {
         p_actions[last_actions[i]] += w[i];

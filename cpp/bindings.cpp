@@ -3,7 +3,7 @@
 // and post_params() / _pred_dist_params() return the same dicts, so that components can be compared directly.
 //
 // Differs from Python: arrays and sub-objects (e.g. suffstats, CRP_o) are returned as copies, so modifying them does not change the C++ object.
-// Hyperparameters and observations are numpy float64 arrays, rather than torch tensors (idealobserver_cpp.to_cpp_value converts them).
+// Hyperparameters and observations are numpy float64 arrays (idealobserver_cpp.to_cpp_value converts other dtypes).
 #include <cstdint>
 
 #include <nanobind/nanobind.h>

@@ -1,10 +1,9 @@
-import pickle
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 
-import torch
 import numpy as np
 
+import utils_sample
 from utils import niceprint
 from subject import Subject
 from idealobserver import IdealObsPF
@@ -331,14 +330,15 @@ def run_replicate(
     :param dict agent_params: parameters of the ideal observer (IdealObsParams)
     :param int N: number of particles
     :param list schedule: blocks of trials, run in order, each of the form (n_trials, c_o, c_r)
-    :param int seed: seed for the environment's RNG and torch's RNG (used by the ideal observer, and to seed the C++ ideal observer).
-        If None, the environment is seeded from fresh OS entropy, and torch's RNG is left untouched.
+    :param int seed: seed for the random number generators of the environment and of the ideal observer (utils_sample.rng, which also seeds the C++ ideal observer).
+        If None, they are seeded from fresh OS entropy.
     :param str backend: implementation of the ideal observer, "python" (IdealObsPF) or "cpp" (IdealObsPFCpp)
     """
-    # The environment is always reseeded, as copies of it in worker processes would otherwise all draw the same random numbers
-    env.seed(seed)
-    if seed is not None:
-        torch.manual_seed(seed)
+    # Independent random streams for the environment and the ideal observer (seeding both with seed would make them draw the same numbers).
+    # They are always reseeded, as copies of them in worker processes would otherwise all draw the same random numbers.
+    env_seed, observer_seed = np.random.SeedSequence(seed).spawn(2)
+    env.seed(env_seed)
+    utils_sample.seed(observer_seed)
 
     exp_history = ExperimentHistory()
     sub_history = IOPFSubjectHistory()
@@ -354,22 +354,6 @@ def run_replicate(
         env.repeat_trials(subject, experiment_history=exp_history, subject_history=sub_history, N=n_trials, c_o=c_o, c_r=c_r, print_level=print_level)
 
     return CombinedHistory(experiment_history=exp_history, subject_history=sub_history)
-
-
-def _init_replicate_worker():
-    """
-    Each worker runs a single replicate at a time, so disable within worker multithreading to prevent oversubscription
-    """
-    torch.set_num_threads(1)
-    torch.set_grad_enabled(False)
-
-
-def _run_replicate_pickled(*args, **kwargs) -> bytes:
-    """
-    Run a replicate and return the pickled result. \\
-    Plain pickling avoids torch.multiprocessing moving every tensor in the history into its own shared memory segment, which is slow.
-    """
-    return pickle.dumps(run_replicate(*args, **kwargs))
 
 
 def run_replicates(
@@ -395,8 +379,8 @@ def run_replicates(
 
     seeds = [None if seed is None else seed + i for i in range(n_replicates)]
 
-    # 'spawn' rather than 'fork', as forking a process with live torch threads (e.g. from a notebook) can deadlock
-    with ProcessPoolExecutor(max_workers=n_workers, mp_context=mp.get_context("spawn"), initializer=_init_replicate_worker) as pool:
-        futures = [pool.submit(_run_replicate_pickled, env, agent_params, N, schedule, s, backend=backend) for s in seeds]
-        return [pickle.loads(f.result()) for f in futures]
+    # 'spawn' rather than 'fork', as forking a multithreaded process (e.g. a notebook kernel) can deadlock
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=mp.get_context("spawn")) as pool:
+        futures = [pool.submit(run_replicate, env, agent_params, N, schedule, s, backend=backend) for s in seeds]
+        return [f.result() for f in futures]
     

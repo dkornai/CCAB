@@ -15,7 +15,7 @@ namespace pf {
 class IdealObsPF {
 public:
     /// The ensemble owns its random number generator, seeded with seed, which it passes to the particles.
-    /// Differs from Python: Python uses torch's global generator, see utils_sample.hpp
+    /// Differs from Python: Python uses the module-level generator utils_sample.rng, see utils_sample.hpp
     IdealObsPF(int N, const IdealObsParams& hyp_params, std::uint64_t seed);
 
     /// Weights of each particle, summing to 1

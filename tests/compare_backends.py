@@ -11,14 +11,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
-import torch
 
 import models_context as MC
 import models_obs_rew as M
 from experiment import ExperimentalEnv, run_replicate, run_replicates
-
-torch.set_grad_enabled(False)
-torch.set_num_threads(1)
 
 COV = np.eye(2) * 0.02
 ENV = ExperimentalEnv(
@@ -34,8 +30,8 @@ ENV = ExperimentalEnv(
 AGENT = {
     "type_context": MC.CjCRP, "type_obs": M.ConjugateGaussianInvWish, "type_rew": M.ConjugateBernoulli,
     "hyp_context": {'gamma': 0.1, 'alpha_o': 0.5, 'alpha_r': 0.5},
-    "hyp_obs": {'mu0': torch.tensor([0.0, 0.0]), 'kappa0': 0.1, 'nu0': 4.0, 'Lambda0': torch.eye(2)},
-    "hyp_rew": {'alpha0': torch.tensor([0.05] * 4), 'beta0': torch.tensor([0.5] * 4)},
+    "hyp_obs": {'mu0': np.array([0.0, 0.0]), 'kappa0': 0.1, 'nu0': 4.0, 'Lambda0': np.eye(2)},
+    "hyp_rew": {'alpha0': np.array([0.05] * 4), 'beta0': np.array([0.5] * 4)},
 }
 SCHEDULE = [(50, 0, 0), (50, 1, 1), (50, 0, 0), (50, 0, 1)]
 

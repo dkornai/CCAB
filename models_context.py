@@ -1,7 +1,8 @@
 from typing import TypedDict, Literal
 
-import torch
-import torch.distributions as D
+import numpy as np
+
+from utils_sample import cat_sample
 
 
 class ContextHypothesis(TypedDict):
@@ -22,7 +23,7 @@ class ContextModel():
         hypothesis_probs:   P_C(C_t = c | xi_{t-1}) for all currently possible c, shape [n_hypotheses]
     """
     context_hypotheses : list[ContextHypothesis]
-    hypothesis_probs   : torch.Tensor
+    hypothesis_probs   : np.ndarray
 
     @property
     def n_hypotheses(self) -> int:
@@ -59,7 +60,7 @@ class CRP():
     def __init__(self, hyp_alpha):
         self.hyp_alpha = hyp_alpha
         
-        self.counts = torch.zeros(100) # this is an artificial upper limit on the number of contexts that is not expected to be reached
+        self.counts = np.zeros(100) # this is an artificial upper limit on the number of contexts that is not expected to be reached
 
         self.n_active_contexts = 0
 
@@ -71,7 +72,7 @@ class CRP():
         These only change when the counts do, so are computed here rather than each time they are needed.
         """
         # probability of each context (including a new one)
-        prob = torch.zeros(self.n_active_contexts+1)
+        prob = np.zeros(self.n_active_contexts+1)
         prob[:-1] = self.counts[:self.n_active_contexts]
         prob[-1] = self.hyp_alpha
         self.probs = prob / prob.sum()
@@ -91,7 +92,7 @@ class CRP():
         """
         Sample from the CRP prior
         """
-        return D.Categorical(probs=self.probs).sample().item()
+        return cat_sample(self.probs)
 
 
 class jCRP(ContextModel):
@@ -147,11 +148,11 @@ class jCRP(ContextModel):
         # Prior probabilities of the context hypotheses
         # If there is only one hypothesis, it must be the jump-to-new-context hypothesis, so its probability is 1
         if len(self.context_hypotheses) == 1:
-            self.hypothesis_probs = torch.ones(1)
+            self.hypothesis_probs = np.ones(1)
 
         # Otherwise, compute probabilities based on the CRP prior and the jump probability
         else:
-            self.hypothesis_probs = torch.zeros(self.n_hypotheses)
+            self.hypothesis_probs = np.zeros(self.n_hypotheses)
 
             # Hypothesis 0 is always the unique stay hypothesis
             self.hypothesis_probs[0] = 1.0 - self.hyp_gamma
@@ -236,11 +237,11 @@ class CjCRP(ContextModel):
         # Prior probabilities of the context hypotheses
         # If there is only one hypothesis, it must be the jump-to-new-context hypothesis, so its probability is 1
         if len(self.context_hypotheses) == 1:
-            self.hypothesis_probs = torch.ones(1)
+            self.hypothesis_probs = np.ones(1)
 
         # Otherwise, we compute the probabilities for each hypothesis based on the CRP priors and the jump probability
         else:
-            self.hypothesis_probs = torch.zeros(self.n_hypotheses)
+            self.hypothesis_probs = np.zeros(self.n_hypotheses)
 
             # Hypothesis 0 is always the unique stay hypothesis
             self.hypothesis_probs[0] = 1.0 - self.hyp_gamma

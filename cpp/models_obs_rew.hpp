@@ -2,8 +2,6 @@
 //
 // Differences from Python that apply throughout the port are marked "Differs from Python:" here, as are those at specific places in the code.
 //
-// Differs from Python: all computations are in float64, while the Python models compute in float32.
-//
 // Differs from Python: invalid hyperparameters and arguments throw std::invalid_argument (ValueError in Python), where Python asserts.
 //
 // Differs from Python: the Python ConjugateModel base class is shared between observation and reward models.
@@ -252,7 +250,8 @@ private:
 // ----------------------------------------
 
 /// Python: mvt_log_prob
-/// Differs from Python: for a single value and distribution, where Python broadcasts over batches
+/// Differs from Python: for a single value and distribution, where Python broadcasts over batches.
+/// Uses a triangular solve as pyro does, where Python uses the general np.linalg.solve (same solution).
 double mvt_log_prob(const VectorXd& value, double df, const VectorXd& loc, const MatrixXd& scale_tril, double norm_const);
 
 }  // namespace pf

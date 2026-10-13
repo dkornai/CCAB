@@ -6,18 +6,18 @@ Build the module with:
     cmake --build cpp/build
 """
 import numpy as np
-import torch
 
 import pf_cpp
 from subject import Subject, IdealObsParams
+from utils_sample import rng
 
 
 def to_cpp_value(value):
     """
-    Convert a hyperparameter or observation to the type expected by pf_cpp (tensors become float64 numpy arrays)
+    Convert a hyperparameter or observation to the type expected by pf_cpp (arrays become float64)
     """
-    if isinstance(value, torch.Tensor):
-        return value.detach().to(torch.float64).numpy()
+    if isinstance(value, np.ndarray):
+        return np.asarray(value, dtype=np.float64)
     return value
 
 
@@ -42,18 +42,18 @@ class IdealObsPFCpp(Subject):
     """
     def __init__(self, N: int, hyp_params: IdealObsParams, seed: int | None = None):
         """
-        Differs from IdealObsPF: the C++ ensemble has its own random number generator, rather than using torch's global one.
+        Differs from IdealObsPF: the C++ ensemble has its own random number generator, rather than using the one in utils_sample.
 
-        :param int seed: seed for the C++ random number generator. If None, it is drawn from torch's RNG, so that seeding torch makes runs reproducible.
+        :param int seed: seed for the C++ random number generator. If None, it is drawn from utils_sample.rng, so that seeding that generator makes runs reproducible.
         """
         if seed is None:
-            seed = int(torch.randint(0, 2**63 - 1, (1,)).item())
+            seed = int(rng.integers(0, 2**63 - 1))
 
         self.N = N
         self.hyp_params = hyp_params
         self._pf = pf_cpp.IdealObsPF(N, to_cpp_params(hyp_params), seed)
 
-    def before_action(self, o_t: np.ndarray | torch.Tensor):
+    def before_action(self, o_t: np.ndarray):
         """
         Process the incoming observation o_t
         """
@@ -65,7 +65,7 @@ class IdealObsPFCpp(Subject):
         """
         return self._pf.select_action()
 
-    def after_action(self, o_t: np.ndarray | torch.Tensor, a_t: int, r_t: float):
+    def after_action(self, o_t: np.ndarray, a_t: int, r_t: float):
         """
         Process the resulting o_t, a_t, r_t emissions at time t
         """
@@ -79,28 +79,28 @@ class IdealObsPFCpp(Subject):
 
     # Tracked quantities, as the same types as in IdealObsPF
     @property
-    def weights(self) -> torch.Tensor:
-        return torch.from_numpy(self._pf.weights)
+    def weights(self) -> np.ndarray:
+        return self._pf.weights
 
     @property
-    def log_weights(self) -> torch.Tensor:
-        return torch.from_numpy(self._pf.log_weights)
+    def log_weights(self) -> np.ndarray:
+        return self._pf.log_weights
 
     @property
-    def vec_s_t(self) -> torch.Tensor:
-        return torch.from_numpy(self._pf.vec_s_t.astype(np.int64))
+    def vec_s_t(self) -> np.ndarray:
+        return self._pf.vec_s_t.astype(int)
 
     @property
-    def vec_c_o_t(self) -> torch.Tensor:
-        return torch.from_numpy(self._pf.vec_c_o_t.astype(np.int64))
+    def vec_c_o_t(self) -> np.ndarray:
+        return self._pf.vec_c_o_t.astype(int)
 
     @property
-    def vec_c_r_t(self) -> torch.Tensor:
-        return torch.from_numpy(self._pf.vec_c_r_t.astype(np.int64))
+    def vec_c_r_t(self) -> np.ndarray:
+        return self._pf.vec_c_r_t.astype(int)
 
     @property
-    def vec_j_t(self) -> torch.Tensor:
-        return torch.from_numpy(self._pf.vec_j_t.astype(np.int64))
+    def vec_j_t(self) -> np.ndarray:
+        return self._pf.vec_j_t.astype(int)
 
     @property
     def p_action(self) -> np.ndarray:
