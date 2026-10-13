@@ -153,6 +153,8 @@ class ConjugateGaussianInvWish(ConjugateModel):
         self.nu_n = self.nu0
         self.Lambda_n = self.Lambda0.clone()
 
+        self._update_pred_dist_params()
+
     def update(self, x: torch.Tensor, confidence: float = 1.0):
         """
         Add a new observation and update posterior parameters.
@@ -197,6 +199,17 @@ class ConjugateGaussianInvWish(ConjugateModel):
         diff = (x_bar - self.mu0).unsqueeze(1)  # column vector, difference between sample mean and prior mean
         self.Lambda_n = (self.Lambda0 + S + ((self.kappa0 * n) / (self.kappa_n)) * (diff @ diff.T))
 
+        self._update_pred_dist_params()
+
+    def _update_pred_dist_params(self):
+        """
+        Update parameters of the multivariate Student-t predictive distribution based on the current posterior parameters. \\
+        These only change when the posterior does, so are computed here rather than each time the predictive likelihood is evaluated.
+        """
+        self.df = self.nu_n - self.d + 1
+        self.scale = (self.Lambda_n * (self.kappa_n + 1)) / (self.kappa_n * self.df)
+        self.scale_tril = torch.linalg.cholesky(self.scale)
+
     def post_params(self):
         return {
             "mu_n":     self.mu_n,
@@ -229,13 +242,11 @@ class ConjugateGaussianInvWish(ConjugateModel):
         """
         Returns parameters of the multivariate Student-t predictive distribution (uncerteanty over mean and variance is integrated out).
         """
-        df = self.nu_n - self.d + 1
-        scale = (self.Lambda_n * (self.kappa_n + 1)) / (self.kappa_n * df)
-
         return {
-            "df":    df,
-            "loc":   self.mu_n,
-            "scale": scale,
+            "df":         self.df,
+            "loc":        self.mu_n,
+            "scale":      self.scale,
+            "scale_tril": self.scale_tril,
         }
 
     def pred_lh(self, x: torch.Tensor):
@@ -243,7 +254,7 @@ class ConjugateGaussianInvWish(ConjugateModel):
         Returns the predictive likelihood of a new observation x.
         """
         params = self._pred_dist_params()
-        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=torch.linalg.cholesky(params["scale"])))
+        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=params["scale_tril"]))
 
 
 class ConjugateGaussianInvGam(ConjugateModel):
@@ -322,6 +333,8 @@ class ConjugateGaussianInvGam(ConjugateModel):
         self.alpha_n = self.alpha0
         self.beta_n = self.beta0
 
+        self._update_pred_dist_params()
+
     def update(self, x: torch.Tensor, confidence: float = 1.0):
         """
         Add an observation and update posterior parameters.
@@ -373,6 +386,17 @@ class ConjugateGaussianInvGam(ConjugateModel):
         diff = x_bar - self.mu0 # difference between sample mean and prior mean
         self.beta_n = self.beta0 + ( 0.5 * sse ) + ((self.kappa0 * n) / (2.0 * self.kappa_n) * torch.dot(diff, diff))
 
+        self._update_pred_dist_params()
+
+    def _update_pred_dist_params(self):
+        """
+        Update parameters of the multivariate Student-t predictive distribution based on the current posterior parameters. \\
+        These only change when the posterior does, so are computed here rather than each time the predictive likelihood is evaluated.
+        """
+        self.df = 2.0 * self.alpha_n
+        self.scale = ((self.beta_n / self.alpha_n) * (self.kappa_n + 1.0) / self.kappa_n ) * torch.eye(self.d)
+        self.scale_tril = torch.linalg.cholesky(self.scale)
+
     def post_params(self):
         """
         Return posterior parameters.
@@ -409,13 +433,11 @@ class ConjugateGaussianInvGam(ConjugateModel):
         """
         Parameters of the multivariate Student-t predictive distribution.
         """
-        df = 2.0 * self.alpha_n
-        scale = ((self.beta_n / self.alpha_n) * (self.kappa_n + 1.0) / self.kappa_n ) * torch.eye(self.d)
-
         return {
-            "df": df,
-            "loc": self.mu_n,
-            "scale": scale,
+            "df":         self.df,
+            "loc":        self.mu_n,
+            "scale":      self.scale,
+            "scale_tril": self.scale_tril,
         }
 
     def pred_lh(self, x: torch.Tensor):
@@ -423,7 +445,7 @@ class ConjugateGaussianInvGam(ConjugateModel):
         Returns the predictive likelihood of a new observation x.
         """
         params = self._pred_dist_params()
-        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=torch.linalg.cholesky(params["scale"])))
+        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=params["scale_tril"]))
 
 
 class SuffStatsRewards(SuffStats):
