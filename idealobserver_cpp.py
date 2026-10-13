@@ -53,7 +53,7 @@ class IdealObsPFCpp(Subject):
         self.hyp_params = hyp_params
         self._pf = pf_cpp.IdealObsPF(N, to_cpp_params(hyp_params), seed)
 
-    def before_action(self, o_t: torch.Tensor):
+    def before_action(self, o_t: np.ndarray | torch.Tensor):
         """
         Process the incoming observation o_t
         """
@@ -65,7 +65,7 @@ class IdealObsPFCpp(Subject):
         """
         return self._pf.select_action()
 
-    def after_action(self, o_t: torch.Tensor, a_t: int, r_t: float):
+    def after_action(self, o_t: np.ndarray | torch.Tensor, a_t: int, r_t: float):
         """
         Process the resulting o_t, a_t, r_t emissions at time t
         """

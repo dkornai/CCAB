@@ -1,16 +1,13 @@
 import pickle
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
-from copy import deepcopy
 
 import torch
-import torch.distributions as D
 import numpy as np
 
 from utils import niceprint
 from subject import Subject
 from idealobserver import IdealObsPF
-from utils_sample import cat_sample
 
 # The C++ ideal observer is only available once the pf_cpp module has been built (see idealobserver_cpp.py)
 try:
@@ -20,7 +17,21 @@ except ModuleNotFoundError:
     IdealObsPFCpp = None
     PF_SUBJECTS = (IdealObsPF,)
 
-class ExperimentHistory():
+class History():
+    """
+    Base class for histories, which track variables as lists with one entry per time step
+    """
+    def to_numpy(self):
+        """
+        Copy of the history in which each tracked variable is a numpy array, with time steps along the first axis
+        """
+        out = self.__class__.__new__(self.__class__)
+        for name, values in vars(self).items():
+            setattr(out, name, np.array(values))
+        return out
+
+
+class ExperimentHistory(History):
     """
     Class to store the history of an experiment, tracking variables available to the experimenter
     """
@@ -29,7 +40,7 @@ class ExperimentHistory():
         self.state          : list[int]             = [] # true latent state (not observable to participant)
         self.context_o      : list[list[int]]       = [] # true context for observation (not observable to participant)
         self.context_r      : list[list[int]]       = [] # true context for reward (not observable to participant)
-        self.observation    : list[torch.Tensor]    = [] # observation passed to participant
+        self.observation    : list[np.ndarray]      = [] # observation passed to participant
         self.optimal_action : list[int]             = [] # optimal action given the true state and reward context (not observable to participant)
         self.action         : list[int]             = [] # action taken by participant
         self.reward         : list[float]           = [] # reward given to participant
@@ -54,7 +65,7 @@ class ExperimentHistory():
         return len(self.state)
 
 
-class SubjectHistory():
+class SubjectHistory(History):
     """
     Class to store the history of a participant's internal variables, which are not directly observable to the experimenter
     """
@@ -78,9 +89,9 @@ class IOPFSubjectHistory(SubjectHistory):
     def __init__(self):
         super().__init__()                      # probability of each action being chosen is tracked in the base class
         self.p_state    : list[np.ndarray] = [] # probability of each latent state
-        self.p_jump     : list[np.ndarray] = [] # probability of a jump
-        self.context_o  : list[list[int]]  = [] # sampled context_o for each particle
-        self.context_r  : list[list[int]]  = [] # sampled context_r for each particle
+        self.p_jump     : list[float]      = [] # probability of a jump
+        self.context_o  : list[np.ndarray] = [] # sampled context_o for each particle
+        self.context_r  : list[np.ndarray] = [] # sampled context_r for each particle
         self.weights    : list[np.ndarray] = [] # weights of each particle
 
     def append(self,  p_action, p_state, p_jump, context_o, context_r, weights):
@@ -100,14 +111,18 @@ class ExperimentalEnv():
     """
     Class to represent the experimental environment
     """
-    def __init__(self, context_o_params : dict = None, context_r_params : dict = None):
+    def __init__(self, context_o_params : dict = None, context_r_params : dict = None, seed : int | None = None):
         """
         Observation and reward contexts are defined by their parameters, which are provided at initialisation.
 
         :param dict[int, dict] context_o_params: parameters for observation contexts, of the form {context_id: {state_id: {param_name: param_value}}}
         :param dict[int, dict] context_r_params: parameters for reward contexts, of the form {context_id: {state_id: {param_name: param_value}}}
+        :param int seed: seed for the environment's random number generator, see seed()
         """
-        self.state_probs = torch.tensor([0.5, 0.5])
+        self.state_probs = np.array([0.5, 0.5])
+        self.state_cdf = np.cumsum(self.state_probs)
+
+        self.seed(seed)
 
         
         assert type(context_o_params) == dict, "context_o_params must be a dictionary of the form {context_id: context_parameters}"
@@ -121,11 +136,17 @@ class ExperimentalEnv():
 
             for state_id, state_params in context_params.items():
                 assert "loc" in state_params and "cov" in state_params, f"Parameters for state {state_id} in context_o_params for context {context_id} must include 'loc' and 'cov'"
-                assert isinstance(state_params["loc"], torch.Tensor), f"'loc' parameter for state {state_id} in context_o_params for context {context_id} must be a torch.Tensor"
-                assert isinstance(state_params["cov"], torch.Tensor), f"'cov' parameter for state {state_id} in context_o_params for context {context_id} must be a torch.Tensor"
+                assert isinstance(state_params["loc"], np.ndarray), f"'loc' parameter for state {state_id} in context_o_params for context {context_id} must be a numpy array"
+                assert isinstance(state_params["cov"], np.ndarray), f"'cov' parameter for state {state_id} in context_o_params for context {context_id} must be a numpy array"
 
         self.context_o_params : dict[int, dict] = context_o_params
-        
+
+        # Cholesky factors of the observation covariances, so that sampling an observation is loc + L @ z with z ~ N(0, I)
+        self.obs_cov_tril = {
+            context_id: {state_id: np.linalg.cholesky(state_params["cov"]) for state_id, state_params in context_params.items()}
+            for context_id, context_params in context_o_params.items()
+        }
+
 
         assert type(context_r_params) == dict, "context_r_params must be a dictionary of the form {context_id: context_parameters}"
         assert all(isinstance(k, int) for k in context_r_params.keys()), "context_r_params keys must be integers representing context IDs"
@@ -138,30 +159,35 @@ class ExperimentalEnv():
 
             for state_id, state_params in context_params.items():
                 assert "p_rew" in state_params, f"Parameters for state {state_id} in context_r_params for context {context_id} must include 'p_rew'"
-                assert all(isinstance(v, (torch.Tensor)) for v in state_params.values()), f"Reward probabilities in context_r_params for state {state_id} in context {context_id} must be torch.Tensors"
+                assert all(isinstance(v, np.ndarray) for v in state_params.values()), f"Reward probabilities in context_r_params for state {state_id} in context {context_id} must be numpy arrays"
 
         self.context_r_params : dict[int, dict] = context_r_params
-        
 
+
+    def seed(self, seed : int | None = None):
+        """
+        (Re)initialise the environment's random number generator. With seed None, it is seeded from fresh OS entropy.
+        """
+        self.rng = np.random.default_rng(seed)
 
     def before_action(self, c_o):
-        
-        # Sample states i.i.d. for each trial
-        s_t = cat_sample(self.state_probs)
+
+        # Sample states i.i.d. for each trial (inverse CDF, clipped in case the CDF sums to slightly less than 1)
+        s_t = min(int(np.searchsorted(self.state_cdf, self.rng.random(), side='right')), len(self.state_probs) - 1)
 
         # Sample observation given the state and observation context
         obs_params = self.context_o_params[c_o][s_t]
-        o_t = D.MultivariateNormal(loc=obs_params["loc"], covariance_matrix=obs_params["cov"]).sample()
+        o_t = obs_params["loc"] + self.obs_cov_tril[c_o][s_t] @ self.rng.standard_normal(obs_params["loc"].shape[0])
 
         return s_t, o_t
 
     def after_action(self, c_r, s_t, a_t):
-        
+
         rew_params = self.context_r_params[c_r][s_t]
 
-        r_t = D.Bernoulli(probs=rew_params["p_rew"][a_t]).sample().item()
+        r_t = float(self.rng.random() < rew_params["p_rew"][a_t])
 
-        opt_a_t = torch.argmax(rew_params["p_rew"]).item()
+        opt_a_t = int(np.argmax(rew_params["p_rew"]))
 
         return r_t, opt_a_t
     
@@ -222,17 +248,18 @@ class ExperimentalEnv():
         experiment_history.append(s_t, c_o, c_r, o_t, opt_a_t, a_t, r_t)
 
         # Record keeping from the subject's perspective, depends on the type of subject
+        # (np.array copies, as the subject may update its variables in place)
         if isinstance(subject, PF_SUBJECTS) and isinstance(subject_history, IOPFSubjectHistory):
             subject_history.append(
-                p_action=subject.p_action, 
-                p_state=subject.p_state, 
-                p_jump=subject.p_jump, 
-                context_o=deepcopy(subject.vec_c_o_t), 
-                context_r=deepcopy(subject.vec_c_r_t),
-                weights=deepcopy(subject.weights)
+                p_action=np.array(subject.p_action),
+                p_state=np.array(subject.p_state),
+                p_jump=float(subject.p_jump),
+                context_o=np.array(subject.vec_c_o_t),
+                context_r=np.array(subject.vec_c_r_t),
+                weights=np.array(subject.weights)
                 )
         else:
-            subject_history.append(p_action=subject.p_action)
+            subject_history.append(p_action=np.array(subject.p_action))
         
         
         if print_level > 2:          
@@ -272,25 +299,20 @@ class ExperimentalEnv():
 
 class CombinedHistory():
     """
-    Class to perform analysis on the experimental and subject history
+    Class to perform analysis on the experimental and subject history. \\
+    Stores copies of the histories in which each tracked variable is a numpy array, with time steps along the first axis.
     """
     def __init__(self, experiment_history: ExperimentHistory, subject_history: SubjectHistory):
-        self.experiment_history = deepcopy(experiment_history)
-        self.subject_history = deepcopy(subject_history)
+        self.experiment_history = experiment_history.to_numpy()
+        self.subject_history = subject_history.to_numpy()
 
     @property
     def p_optimal_action(self):
         """
         Calculate the probability of optimal actions being taken by the subject at each time step
         """
-        optimal_actions = np.array(self.experiment_history.optimal_action)
-        subject_actions_probs = np.array(self.subject_history.p_action)
-
-        output = np.zeros(len(optimal_actions))
-        for t in range(len(optimal_actions)):
-            output[t] = subject_actions_probs[t][optimal_actions[t]]
-
-        return output
+        n_steps = len(self.experiment_history.optimal_action)
+        return self.subject_history.p_action[np.arange(n_steps), self.experiment_history.optimal_action]
 
 
 def run_replicate(
@@ -309,9 +331,12 @@ def run_replicate(
     :param dict agent_params: parameters of the ideal observer (IdealObsParams)
     :param int N: number of particles
     :param list schedule: blocks of trials, run in order, each of the form (n_trials, c_o, c_r)
-    :param int seed: seed for torch's RNG, or None to leave the RNG untouched. The C++ ideal observer is seeded from torch's RNG.
+    :param int seed: seed for the environment's RNG and torch's RNG (used by the ideal observer, and to seed the C++ ideal observer).
+        If None, the environment is seeded from fresh OS entropy, and torch's RNG is left untouched.
     :param str backend: implementation of the ideal observer, "python" (IdealObsPF) or "cpp" (IdealObsPFCpp)
     """
+    # The environment is always reseeded, as copies of it in worker processes would otherwise all draw the same random numbers
+    env.seed(seed)
     if seed is not None:
         torch.manual_seed(seed)
 

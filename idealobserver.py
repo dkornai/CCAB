@@ -34,10 +34,12 @@ class IdealObsPF(Subject):
         """
         return torch.exp(self.log_weights - torch.logsumexp(self.log_weights, dim=0))
 
-    def before_action(self, o_t: torch.Tensor):
+    def before_action(self, o_t: np.ndarray | torch.Tensor):
         """
         Process the incoming observation o_t
         """
+        o_t = torch.as_tensor(o_t, dtype=torch.float32) # the environment provides numpy observations, the particles compute in float32 torch
+
         for particle in self.particles:
             particle.before_action(o_t)
 
@@ -56,10 +58,12 @@ class IdealObsPF(Subject):
 
         return selected_action
 
-    def after_action(self, o_t: torch.Tensor, a_t: int, r_t: float):
+    def after_action(self, o_t: np.ndarray | torch.Tensor, a_t: int, r_t: float):
         """
         Process the resulting o_t, a_t, r_t emissions at time t
         """
+        o_t = torch.as_tensor(o_t, dtype=torch.float32) # the environment provides numpy observations, the particles compute in float32 torch
+
         # Each particle conducts inference on the latent state and contexts, and updates internal parameters
         for i, particle in enumerate(self.particles):
             s_t, c_o_t, c_r_t, j_t = particle.after_action(o_t, int(a_t), float(r_t))

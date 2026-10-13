@@ -20,15 +20,15 @@ from experiment import ExperimentalEnv, run_replicate, run_replicates
 torch.set_grad_enabled(False)
 torch.set_num_threads(1)
 
-COV = torch.eye(2) * 0.02
+COV = np.eye(2) * 0.02
 ENV = ExperimentalEnv(
     context_o_params={
-        0: {0: {'loc': torch.tensor([1.0, 0.0]), 'cov': COV}, 1: {'loc': torch.tensor([-1.0, 0.0]), 'cov': COV}},
-        1: {0: {'loc': torch.tensor([0.0, 1.0]), 'cov': COV}, 1: {'loc': torch.tensor([0.0, -1.0]), 'cov': COV}},
+        0: {0: {'loc': np.array([1.0, 0.0]), 'cov': COV}, 1: {'loc': np.array([-1.0, 0.0]), 'cov': COV}},
+        1: {0: {'loc': np.array([0.0, 1.0]), 'cov': COV}, 1: {'loc': np.array([0.0, -1.0]), 'cov': COV}},
     },
     context_r_params={
-        0: {0: {'p_rew': torch.tensor([1.0, 0.0, 0.0, 0.0])}, 1: {'p_rew': torch.tensor([0.0, 1.0, 0.0, 0.0])}},
-        1: {0: {'p_rew': torch.tensor([0.0, 0.0, 1.0, 0.0])}, 1: {'p_rew': torch.tensor([0.0, 0.0, 0.0, 1.0])}},
+        0: {0: {'p_rew': np.array([1.0, 0.0, 0.0, 0.0])}, 1: {'p_rew': np.array([0.0, 1.0, 0.0, 0.0])}},
+        1: {0: {'p_rew': np.array([0.0, 0.0, 1.0, 0.0])}, 1: {'p_rew': np.array([0.0, 0.0, 0.0, 1.0])}},
     },
 )
 AGENT = {
