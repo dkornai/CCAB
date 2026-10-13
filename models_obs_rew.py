@@ -1,6 +1,7 @@
+import math
+
 import torch
 import torch.distributions as D
-import pyro.distributions as pyroD
 
 
 class SuffStats:
@@ -242,8 +243,7 @@ class ConjugateGaussianInvWish(ConjugateModel):
         Returns the predictive likelihood of a new observation x.
         """
         params = self._pred_dist_params()
-        pred_dist = pyroD.MultivariateStudentT(df=params["df"], loc=params["loc"], scale_tril=torch.linalg.cholesky(params["scale"]),)
-        return torch.exp(pred_dist.log_prob(x))
+        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=torch.linalg.cholesky(params["scale"])))
 
 
 class ConjugateGaussianInvGam(ConjugateModel):
@@ -423,8 +423,7 @@ class ConjugateGaussianInvGam(ConjugateModel):
         Returns the predictive likelihood of a new observation x.
         """
         params = self._pred_dist_params()
-        pred_dist = pyroD.MultivariateStudentT(df=params["df"], loc=params["loc"], scale_tril=torch.linalg.cholesky(params["scale"]),)
-        return torch.exp(pred_dist.log_prob(x))
+        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=torch.linalg.cholesky(params["scale"])))
 
 
 class SuffStatsRewards(SuffStats):
@@ -670,3 +669,36 @@ class ConjugateOptimalArm(ConjugateModel):
             return 1.0 - p
         else:
             raise ValueError(f"reward r must be 0.0 or 1.0, got {r}")
+
+
+
+#### UTILS
+
+
+def mvt_log_prob(value: torch.Tensor, df, loc: torch.Tensor, scale_tril: torch.Tensor) -> torch.Tensor:
+    """
+    Log density of a multivariate Student-t distribution at value.
+
+    Copied from pyro.distributions.MultivariateStudentT (pyro 1.9.1): __init__ (conversion of df to a tensor) and log_prob. \\
+    Skips the construction of the distribution object, argument validation, and the explicit expansion of df, loc, and scale_tril
+    to the batch shape, as all operations below broadcast to the same result.
+
+    :param torch.Tensor value: point(s) at which to evaluate the density [..., d]
+    :param df: degrees of freedom, float or tensor [...]
+    :param torch.Tensor loc: location [..., d]
+    :param torch.Tensor scale_tril: lower Cholesky factor of the scale matrix [..., d, d]
+    """
+    if not isinstance(df, torch.Tensor):
+        df = loc.new_tensor(df)
+    n = loc.size(-1)
+    y = torch.linalg.solve_triangular(
+        scale_tril, (value - loc).unsqueeze(-1), upper=False
+    ).squeeze(-1)
+    Z = (
+        scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
+        + 0.5 * n * df.log()
+        + 0.5 * n * math.log(math.pi)
+        + torch.lgamma(0.5 * df)
+        - torch.lgamma(0.5 * (df + n))
+    )
+    return -0.5 * (df + n) * torch.log1p(y.pow(2).sum(-1) / df) - Z
