@@ -12,6 +12,14 @@ from subject import Subject
 from idealobserver import IdealObsPF
 from utils_sample import cat_sample
 
+# The C++ ideal observer is only available once the pf_cpp module has been built (see idealobserver_cpp.py)
+try:
+    from idealobserver_cpp import IdealObsPFCpp
+    PF_SUBJECTS = (IdealObsPF, IdealObsPFCpp)
+except ModuleNotFoundError:
+    IdealObsPFCpp = None
+    PF_SUBJECTS = (IdealObsPF,)
+
 class ExperimentHistory():
     """
     Class to store the history of an experiment, tracking variables available to the experimenter
@@ -214,7 +222,7 @@ class ExperimentalEnv():
         experiment_history.append(s_t, c_o, c_r, o_t, opt_a_t, a_t, r_t)
 
         # Record keeping from the subject's perspective, depends on the type of subject
-        if isinstance(subject, IdealObsPF) and isinstance(subject_history, IOPFSubjectHistory):
+        if isinstance(subject, PF_SUBJECTS) and isinstance(subject_history, IOPFSubjectHistory):
             subject_history.append(
                 p_action=subject.p_action, 
                 p_state=subject.p_state, 
@@ -228,7 +236,7 @@ class ExperimentalEnv():
         
         
         if print_level > 2:          
-            if isinstance(subject, IdealObsPF):
+            if isinstance(subject, PF_SUBJECTS):
                 print(f", Action probs.: {niceprint(subject.p_action, 2)}", end='')
 
         if print_level > 1:
@@ -291,7 +299,8 @@ def run_replicate(
     N: int,
     schedule: list[tuple[int, int, int]],
     seed: int | None = None,
-    print_level: int = 0
+    print_level: int = 0,
+    backend: str = "python"
     ) -> CombinedHistory:
     """
     Run a single replicate of the experiment with a freshly initialised ideal observer.
@@ -300,14 +309,21 @@ def run_replicate(
     :param dict agent_params: parameters of the ideal observer (IdealObsParams)
     :param int N: number of particles
     :param list schedule: blocks of trials, run in order, each of the form (n_trials, c_o, c_r)
-    :param int seed: seed for torch's RNG, or None to leave the RNG untouched
+    :param int seed: seed for torch's RNG, or None to leave the RNG untouched. The C++ ideal observer is seeded from torch's RNG.
+    :param str backend: implementation of the ideal observer, "python" (IdealObsPF) or "cpp" (IdealObsPFCpp)
     """
     if seed is not None:
         torch.manual_seed(seed)
 
     exp_history = ExperimentHistory()
     sub_history = IOPFSubjectHistory()
-    subject = IdealObsPF(N=N, hyp_params=agent_params)
+    if backend == "python":
+        subject = IdealObsPF(N=N, hyp_params=agent_params)
+    elif backend == "cpp":
+        assert IdealObsPFCpp is not None, "the C++ backend requires the pf_cpp module to be built (see idealobserver_cpp.py)"
+        subject = IdealObsPFCpp(N=N, hyp_params=agent_params)
+    else:
+        raise ValueError(f"Unknown backend {backend}, must be 'python' or 'cpp'")
 
     for n_trials, c_o, c_r in schedule:
         env.repeat_trials(subject, experiment_history=exp_history, subject_history=sub_history, N=n_trials, c_o=c_o, c_r=c_r, print_level=print_level)
@@ -323,12 +339,12 @@ def _init_replicate_worker():
     torch.set_grad_enabled(False)
 
 
-def _run_replicate_pickled(*args) -> bytes:
+def _run_replicate_pickled(*args, **kwargs) -> bytes:
     """
     Run a replicate and return the pickled result. \\
     Plain pickling avoids torch.multiprocessing moving every tensor in the history into its own shared memory segment, which is slow.
     """
-    return pickle.dumps(run_replicate(*args))
+    return pickle.dumps(run_replicate(*args, **kwargs))
 
 
 def run_replicates(
@@ -338,7 +354,8 @@ def run_replicates(
     schedule: list[tuple[int, int, int]],
     n_replicates: int,
     n_workers: int,
-    seed: int | None = None
+    seed: int | None = None,
+    backend: str = "python"
     ) -> list[CombinedHistory]:
     """
     Run independent replicates of the experiment in parallel, with one replicate per worker process at a time.
@@ -346,6 +363,7 @@ def run_replicates(
     :param int n_replicates: number of replicates to run
     :param int n_workers: number of worker processes
     :param int seed: if given, replicate i is seeded with seed + i (reproducible), otherwise each worker process is randomly seeded
+    :param str backend: implementation of the ideal observer, "python" or "cpp", see run_replicate
     :return list[CombinedHistory]: histories in replicate order
     """
     assert 1 <= n_workers <= mp.cpu_count(), "Number of workers is limited to the number of hardware threads"
@@ -354,6 +372,6 @@ def run_replicates(
 
     # 'spawn' rather than 'fork', as forking a process with live torch threads (e.g. from a notebook) can deadlock
     with ProcessPoolExecutor(max_workers=n_workers, mp_context=mp.get_context("spawn"), initializer=_init_replicate_worker) as pool:
-        futures = [pool.submit(_run_replicate_pickled, env, agent_params, N, schedule, s) for s in seeds]
+        futures = [pool.submit(_run_replicate_pickled, env, agent_params, N, schedule, s, backend=backend) for s in seeds]
         return [pickle.loads(f.result()) for f in futures]
     
