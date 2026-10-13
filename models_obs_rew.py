@@ -210,6 +210,16 @@ class ConjugateGaussianInvWish(ConjugateModel):
         self.scale = (self.Lambda_n * (self.kappa_n + 1)) / (self.kappa_n * self.df)
         self.scale_tril = torch.linalg.cholesky(self.scale)
 
+        # Log normalising constant of the multivariate Student-t, see mvt_log_prob
+        df = self.scale_tril.new_tensor(self.df)
+        self.norm_const = (
+            self.scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
+            + 0.5 * self.d * df.log()
+            + 0.5 * self.d * math.log(math.pi)
+            + torch.lgamma(0.5 * df)
+            - torch.lgamma(0.5 * (df + self.d))
+        )
+
     def post_params(self):
         return {
             "mu_n":     self.mu_n,
@@ -247,6 +257,7 @@ class ConjugateGaussianInvWish(ConjugateModel):
             "loc":        self.mu_n,
             "scale":      self.scale,
             "scale_tril": self.scale_tril,
+            "norm_const": self.norm_const,
         }
 
     def pred_lh(self, x: torch.Tensor):
@@ -254,7 +265,7 @@ class ConjugateGaussianInvWish(ConjugateModel):
         Returns the predictive likelihood of a new observation x.
         """
         params = self._pred_dist_params()
-        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=params["scale_tril"]))
+        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=params["scale_tril"], norm_const=params["norm_const"]))
 
 
 class ConjugateGaussianInvGam(ConjugateModel):
@@ -397,6 +408,16 @@ class ConjugateGaussianInvGam(ConjugateModel):
         self.scale = ((self.beta_n / self.alpha_n) * (self.kappa_n + 1.0) / self.kappa_n ) * torch.eye(self.d)
         self.scale_tril = torch.linalg.cholesky(self.scale)
 
+        # Log normalising constant of the multivariate Student-t, see mvt_log_prob
+        df = self.scale_tril.new_tensor(self.df)
+        self.norm_const = (
+            self.scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
+            + 0.5 * self.d * df.log()
+            + 0.5 * self.d * math.log(math.pi)
+            + torch.lgamma(0.5 * df)
+            - torch.lgamma(0.5 * (df + self.d))
+        )
+
     def post_params(self):
         """
         Return posterior parameters.
@@ -438,6 +459,7 @@ class ConjugateGaussianInvGam(ConjugateModel):
             "loc":        self.mu_n,
             "scale":      self.scale,
             "scale_tril": self.scale_tril,
+            "norm_const": self.norm_const,
         }
 
     def pred_lh(self, x: torch.Tensor):
@@ -445,7 +467,7 @@ class ConjugateGaussianInvGam(ConjugateModel):
         Returns the predictive likelihood of a new observation x.
         """
         params = self._pred_dist_params()
-        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=params["scale_tril"]))
+        return torch.exp(mvt_log_prob(x, df=params["df"], loc=params["loc"], scale_tril=params["scale_tril"], norm_const=params["norm_const"]))
 
 
 class SuffStatsRewards(SuffStats):
@@ -697,7 +719,7 @@ class ConjugateOptimalArm(ConjugateModel):
 #### UTILS
 
 
-def mvt_log_prob(value: torch.Tensor, df, loc: torch.Tensor, scale_tril: torch.Tensor) -> torch.Tensor:
+def mvt_log_prob(value: torch.Tensor, df, loc: torch.Tensor, scale_tril: torch.Tensor, norm_const: torch.Tensor) -> torch.Tensor:
     """
     Log density of a multivariate Student-t distribution at value.
 
@@ -705,10 +727,21 @@ def mvt_log_prob(value: torch.Tensor, df, loc: torch.Tensor, scale_tril: torch.T
     Skips the construction of the distribution object, argument validation, and the explicit expansion of df, loc, and scale_tril
     to the batch shape, as all operations below broadcast to the same result.
 
+    The log normalising constant Z does not depend on value, so it is passed in precomputed. In pyro it is:
+        Z = (
+            scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
+            + 0.5 * n * df.log()
+            + 0.5 * n * math.log(math.pi)
+            + torch.lgamma(0.5 * df)
+            - torch.lgamma(0.5 * (df + n))
+        )
+    with df converted to a tensor as below.
+
     :param torch.Tensor value: point(s) at which to evaluate the density [..., d]
     :param df: degrees of freedom, float or tensor [...]
     :param torch.Tensor loc: location [..., d]
     :param torch.Tensor scale_tril: lower Cholesky factor of the scale matrix [..., d, d]
+    :param torch.Tensor norm_const: log normalising constant Z [...]
     """
     if not isinstance(df, torch.Tensor):
         df = loc.new_tensor(df)
@@ -716,11 +749,4 @@ def mvt_log_prob(value: torch.Tensor, df, loc: torch.Tensor, scale_tril: torch.T
     y = torch.linalg.solve_triangular(
         scale_tril, (value - loc).unsqueeze(-1), upper=False
     ).squeeze(-1)
-    Z = (
-        scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-        + 0.5 * n * df.log()
-        + 0.5 * n * math.log(math.pi)
-        + torch.lgamma(0.5 * df)
-        - torch.lgamma(0.5 * (df + n))
-    )
-    return -0.5 * (df + n) * torch.log1p(y.pow(2).sum(-1) / df) - Z
+    return -0.5 * (df + n) * torch.log1p(y.pow(2).sum(-1) / df) - norm_const

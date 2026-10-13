@@ -16,19 +16,17 @@ class ContextModel():
     """
     General interface for a context model. This is an abstract class that should be subclassed to implement specific context models.
     The methods here provide type hints and documentation for the expected behavior of context models.
+
+    Subclasses must set the following attributes whenever the context hypotheses change:
+        context_hypotheses: list of all currently possible context hypotheses c
+        hypothesis_probs:   P_C(C_t = c | xi_{t-1}) for all currently possible c, shape [n_hypotheses]
     """
+    context_hypotheses : list[ContextHypothesis]
+    hypothesis_probs   : torch.Tensor
 
     @property
     def n_hypotheses(self) -> int:
         return len(self.context_hypotheses)
-
-    @property
-    def hypothesis_probs(self) -> torch.Tensor:
-        """
-        P_C(C_t = c | xi_{t-1}) for all currently possible c.
-        Shape: [n_hypotheses]
-        """
-        raise NotImplementedError
 
     def hypothesis_o(self, c: int) -> int:
         """
@@ -65,18 +63,18 @@ class CRP():
 
         self.n_active_contexts = 0
 
-    @property
-    def probs(self):
+        self._update_probs()
+
+    def _update_probs(self):
         """
-        Prior probabilities for each category, including a new one
+        Prior probabilities for each category, including a new one. \\
+        These only change when the counts do, so are computed here rather than each time they are needed.
         """
-        # returns the probability of each context (including a new one)
+        # probability of each context (including a new one)
         prob = torch.zeros(self.n_active_contexts+1)
         prob[:-1] = self.counts[:self.n_active_contexts]
         prob[-1] = self.hyp_alpha
-        prob = prob / prob.sum()
-        
-        return prob
+        self.probs = prob / prob.sum()
 
     def update(self, c:int):
         """
@@ -85,8 +83,10 @@ class CRP():
         self.counts[c] += 1
 
         if c == self.n_active_contexts:
-            self.n_active_contexts += 1        
-            
+            self.n_active_contexts += 1
+
+        self._update_probs()
+
     def sample(self) -> int:
         """
         Sample from the CRP prior
@@ -144,28 +144,21 @@ class jCRP(ContextModel):
                         "rew_model": c,
                     })
 
-    @property
-    def hypothesis_probs(self):
-
+        # Prior probabilities of the context hypotheses
         # If there is only one hypothesis, it must be the jump-to-new-context hypothesis, so its probability is 1
         if len(self.context_hypotheses) == 1:
-            probs = torch.ones(1)
+            self.hypothesis_probs = torch.ones(1)
 
         # Otherwise, compute probabilities based on the CRP prior and the jump probability
         else:
-            probs = torch.zeros(self.n_hypotheses)
+            self.hypothesis_probs = torch.zeros(self.n_hypotheses)
 
             # Hypothesis 0 is always the unique stay hypothesis
-            probs[0] = 1.0 - self.hyp_gamma
+            self.hypothesis_probs[0] = 1.0 - self.hyp_gamma
 
-            # Remaining hypotheses are jumps
-            for i, hyp in enumerate(self.context_hypotheses[1:], start=1):
-                c = hyp["obs_model"]
-
-                # The same context determines both observation and reward models
-                probs[i] = self.hyp_gamma * self.CRP.probs[c]
-
-        return probs
+            # Remaining hypotheses are jumps, one for each CRP context c in order
+            # The same context determines both observation and reward models
+            self.hypothesis_probs[1:] = self.hyp_gamma * self.CRP.probs
 
     def update(self, c_t: int):
         """
@@ -240,29 +233,22 @@ class CjCRP(ContextModel):
                         "rew_model": c_r,
                     })
 
-    @property
-    def hypothesis_probs(self):
-
-        # If there is only one hypothesis, it must be the stay hypothesis, so its probability is 1
+        # Prior probabilities of the context hypotheses
+        # If there is only one hypothesis, it must be the jump-to-new-context hypothesis, so its probability is 1
         if len(self.context_hypotheses) == 1:
-            probs = torch.ones(1)
+            self.hypothesis_probs = torch.ones(1)
 
         # Otherwise, we compute the probabilities for each hypothesis based on the CRP priors and the jump probability
         else:
-            probs = torch.zeros(self.n_hypotheses)
+            self.hypothesis_probs = torch.zeros(self.n_hypotheses)
 
-            # Hypothesis 1 is always the unique stay hypothesis
-            probs[0] = 1.0 - self.hyp_gamma
+            # Hypothesis 0 is always the unique stay hypothesis
+            self.hypothesis_probs[0] = 1.0 - self.hyp_gamma
 
-            # Remaining hypotheses 1, 2, 3 ... are jumps
-            for i, hyp in enumerate(self.context_hypotheses[1:], start=1):
-                c_o = hyp["obs_model"]
-                c_r = hyp["rew_model"]
+            # Remaining hypotheses 1, 2, 3 ... are jumps, ordered as in the Cartesian product above (c_o outer, c_r inner),
+            # which is the order of the flattened outer product of the CRP probabilities
+            self.hypothesis_probs[1:] = ((self.hyp_gamma * self.CRP_o.probs)[:, None] * self.CRP_r.probs[None, :]).flatten()
 
-                probs[i] = (self.hyp_gamma * self.CRP_o.probs[c_o] * self.CRP_r.probs[c_r])
-
-        return probs
-     
     def update(self, c_t: int):
         """
         Wrapper function that combines updates to the underlying CRPs.
