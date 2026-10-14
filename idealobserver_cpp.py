@@ -1,9 +1,8 @@
 """
 Wrapper around the C++ port of the ideal observer (module pf_cpp, sources in cpp/), with the same interface as IdealObsPF.
 
-Build the module with:
-    cmake -S cpp -B cpp/build -G Ninja -DPython_EXECUTABLE=$(which python)
-    cmake --build cpp/build
+The module has to be built for each machine, with:
+    python cpp/build_cpp.py
 """
 import numpy as np
 

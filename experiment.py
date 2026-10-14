@@ -8,13 +8,18 @@ from utils import niceprint
 from subject import Subject
 from idealobserver import IdealObsPF
 
-# The C++ ideal observer is only available once the pf_cpp module has been built (see idealobserver_cpp.py)
+# The C++ ideal observer is only available once the pf_cpp module has been built for this machine.
+# If it is not, CPP_BACKEND_ERROR explains how to build it (and is None otherwise).
 try:
     from idealobserver_cpp import IdealObsPFCpp
     PF_SUBJECTS = (IdealObsPF, IdealObsPFCpp)
-except ModuleNotFoundError:
+    CPP_BACKEND_ERROR = None
+except ImportError as error:
+    if error.name != "pf_cpp": # an import error in the Python code itself
+        raise
     IdealObsPFCpp = None
     PF_SUBJECTS = (IdealObsPF,)
+    CPP_BACKEND_ERROR = f"The C++ backend is not built for this machine ({error}). Build it with `python cpp/build_cpp.py`, then restart the kernel."
 
 class History():
     """
@@ -345,7 +350,8 @@ def run_replicate(
     if backend == "python":
         subject = IdealObsPF(N=N, hyp_params=agent_params)
     elif backend == "cpp":
-        assert IdealObsPFCpp is not None, "the C++ backend requires the pf_cpp module to be built (see idealobserver_cpp.py)"
+        if CPP_BACKEND_ERROR is not None:
+            raise RuntimeError(CPP_BACKEND_ERROR)
         subject = IdealObsPFCpp(N=N, hyp_params=agent_params)
     else:
         raise ValueError(f"Unknown backend {backend}, must be 'python' or 'cpp'")
@@ -376,8 +382,10 @@ def run_replicates(
     :return list[CombinedHistory]: histories in replicate order
     """
     assert 1 <= n_workers <= mp.cpu_count(), "Number of workers is limited to the number of hardware threads"
+    if backend == "cpp" and CPP_BACKEND_ERROR is not None: # fail before starting the workers
+        raise RuntimeError(CPP_BACKEND_ERROR)
 
-    seeds = [None if seed is None else seed + i for i in range(n_replicates)]
+    seeds =[None if seed is None else seed + i for i in range(n_replicates)]
 
     # 'spawn' rather than 'fork', as forking a multithreaded process (e.g. a notebook kernel) can deadlock
     with ProcessPoolExecutor(max_workers=n_workers, mp_context=mp.get_context("spawn")) as pool:
