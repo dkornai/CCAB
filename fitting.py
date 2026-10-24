@@ -453,16 +453,59 @@ def run_chains(
         return [f.result() for f in futures]
 
 
+def split_chains(chains: list[Chain]) -> np.ndarray:
+    """
+    Samples on the unconstrained scale, with each chain split into its first and second half [2 * n_chains, n, d],
+    so that diagnostics also detect chains that drift within themselves
+    """
+    n = min(len(chain.theta) for chain in chains) // 2
+    return np.stack([half for chain in chains for half in (chain.theta[:n], chain.theta[n:2 * n])])
+
+
 def rhat(chains: list[Chain]) -> dict[str, float]:
     """
     Split R-hat (Gelman et al. 2013) of each free hyperparameter across chains, on the unconstrained scale.
     Values below ~1.01 indicate that the chains have converged to the same distribution.
     """
-    n = min(len(chain.theta) for chain in chains) // 2
-    halves = np.stack([half for chain in chains for half in (chain.theta[:n], chain.theta[n:2 * n])]) # [2 * n_chains, n, d]
+    halves = split_chains(chains)
+    n = halves.shape[1]
 
     within = halves.var(axis=1, ddof=1).mean(axis=0)
     between = n * halves.mean(axis=1).var(axis=0, ddof=1)
     var_plus = (n - 1) / n * within + between / n
 
     return {name: float(r) for name, r in zip(chains[0].names, np.sqrt(var_plus / within))}
+
+
+def ess(chains: list[Chain]) -> dict[str, float]:
+    """
+    Effective sample size of each free hyperparameter across chains, on the unconstrained scale (Gelman et al. 2013, ch. 11.5):
+    the number of independent samples that would estimate the posterior mean as precisely as the (autocorrelated) samples of the chains.
+    A few hundred are enough for medians and 95% intervals, ~1000 or more give smooth histograms.
+    """
+    halves = split_chains(chains)
+    m, n, _ = halves.shape
+
+    # Autocovariance of each split chain at lags 0 ... n-1, by FFT [m, n, d]
+    centred = halves - halves.mean(axis=1, keepdims=True)
+    spectrum = np.fft.rfft(centred, n=2 * n, axis=1)
+    acov = np.fft.irfft(spectrum * np.conj(spectrum), n=2 * n, axis=1)[:, :n] / n
+
+    within = acov[:, 0].mean(axis=0) * n / (n - 1)
+    var_plus = (n - 1) / n * within + halves.mean(axis=1).var(axis=0, ddof=1)
+
+    # Autocorrelation at each lag, combining the chains [n, d]
+    rho = 1.0 - (within - acov.mean(axis=0)) / var_plus
+
+    result = {}
+    for j, name in enumerate(chains[0].names):
+        # Geyer's initial monotone sequence: sums of pairs of consecutive autocorrelations, up to the first non-positive pair, made non-increasing
+        pairs = rho[: 2 * (n // 2), j].reshape(-1, 2).sum(axis=1)
+        non_positive = np.flatnonzero(pairs <= 0.0)
+        pairs = np.minimum.accumulate(pairs[: non_positive[0] if len(non_positive) else len(pairs)])
+        tau = -1.0 + 2.0 * pairs.sum() # integrated autocorrelation time
+
+        # Lower bound on tau as in Stan, so that the estimate stays finite for (unusual) anticorrelated chains
+        result[name] = float(m * n / max(tau, 1.0 / np.log10(m * n)))
+
+    return result
