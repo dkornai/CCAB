@@ -50,7 +50,7 @@ HYP_NIW_3D = {'mu0': np.array([0.5, -0.2, 0.0]), 'kappa0': 0.5, 'nu0': 5.0,
 HYP_NIG = {'mu0': np.array([0.0, 0.0]), 'kappa0': 0.1, 'alpha0': 2.0, 'beta0': 1.0}
 HYP_BB = {'alpha0': np.array([0.05, 0.05, 0.05, 0.05]), 'beta0': np.array([0.5, 0.5, 0.5, 0.5])}
 HYP_CAT = {'rho_c': 0.75, 'rho_i': 0.25, 'beta0': np.array([0.25, 0.25, 0.25, 0.25])}
-HYP_CJCRP = {'gamma': 0.1, 'alpha_o': 0.5, 'alpha_r': 0.5}
+HYP_CJCRP = {'gamma': 0.1, 'alpha': 0.5}
 HYP_JCRP = {'gamma': 0.1, 'alpha': 0.5}
 
 AGENTS = {

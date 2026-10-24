@@ -192,10 +192,9 @@ NB_MODULE(pf_cpp, m) {
         .def_ro("prev_c", &pf::jCRP::prev_c);
 
     nb::class_<pf::CjCRP, pf::ContextModel>(m, "CjCRP")
-        .def(nb::init<double, double, double>(), "gamma"_a, "alpha_o"_a, "alpha_r"_a)
+        .def(nb::init<double, double>(), "gamma"_a, "alpha"_a)
         .def_ro("hyp_gamma", &pf::CjCRP::hyp_gamma)
-        .def_ro("hyp_alpha_o", &pf::CjCRP::hyp_alpha_o)
-        .def_ro("hyp_alpha_r", &pf::CjCRP::hyp_alpha_r)
+        .def_ro("hyp_alpha", &pf::CjCRP::hyp_alpha)
         .def_prop_ro("CRP_o", copy_of(&pf::CjCRP::CRP_o))
         .def_prop_ro("CRP_r", copy_of(&pf::CjCRP::CRP_r))
         .def_ro("prev_c_o", &pf::CjCRP::prev_c_o)

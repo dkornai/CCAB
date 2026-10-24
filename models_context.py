@@ -183,16 +183,16 @@ class jCRP(ContextModel):
 
 class CjCRP(ContextModel):
     """
-    Class for a coupled jump CRP
+    Class for a coupled jump CRP.
+    Observation and reward contexts have separate CRPs, which share the concentration parameter alpha, so that the model has the same hyperparameters as the jCRP.
     """
-    def __init__(self, gamma : float,  alpha_o : float, alpha_r : float):
-        self.hyp_gamma   = gamma
-        self.hyp_alpha_o = alpha_o
-        self.hyp_alpha_r = alpha_r
+    def __init__(self, gamma : float, alpha : float):
+        self.hyp_gamma = gamma
+        self.hyp_alpha = alpha
 
-        # Set up individual CRPs for 
-        self.CRP_o = CRP(hyp_alpha=alpha_o)
-        self.CRP_r = CRP(hyp_alpha=alpha_r)
+        # Set up individual CRPs for observation and reward contexts
+        self.CRP_o = CRP(hyp_alpha=alpha)
+        self.CRP_r = CRP(hyp_alpha=alpha)
 
         # Due to the jump mixture, we need to keep track of the previous contexts
         self.prev_c_o = 0

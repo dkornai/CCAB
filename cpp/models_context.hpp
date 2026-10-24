@@ -99,10 +99,10 @@ public:
 };
 
 
-/// Python: CjCRP
+/// Python: CjCRP. Observation and reward contexts have separate CRPs, which share the concentration parameter alpha
 class CjCRP : public ContextModel {
 public:
-    CjCRP(double gamma, double alpha_o, double alpha_r);
+    CjCRP(double gamma, double alpha);
 
     std::unique_ptr<ContextModel> clone() const override;
     void update(int c_t) override;
@@ -111,8 +111,7 @@ public:
     void fill_context_hypotheses();
 
     double hyp_gamma;
-    double hyp_alpha_o;
-    double hyp_alpha_r;
+    double hyp_alpha;
 
     CRP CRP_o;
     CRP CRP_r;

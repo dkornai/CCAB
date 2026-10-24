@@ -29,7 +29,7 @@ ENV = ExperimentalEnv(
 )
 AGENT = {
     "type_context": MC.CjCRP, "type_obs": M.ConjugateGaussianInvWish, "type_rew": M.ConjugateBernoulli,
-    "hyp_context": {'gamma': 0.1, 'alpha_o': 0.5, 'alpha_r': 0.5},
+    "hyp_context": {'gamma': 0.1, 'alpha': 0.5},
     "hyp_obs": {'mu0': np.array([0.0, 0.0]), 'kappa0': 0.1, 'nu0': 4.0, 'Lambda0': np.eye(2)},
     "hyp_rew": {'alpha0': np.array([0.05] * 4), 'beta0': np.array([0.5] * 4)},
 }

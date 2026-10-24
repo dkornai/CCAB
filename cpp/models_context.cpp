@@ -114,8 +114,8 @@ void jCRP::update(int c_t) {
 //   CjCRP
 // ----------------------------------------
 
-CjCRP::CjCRP(double gamma, double alpha_o, double alpha_r)
-    : hyp_gamma(gamma), hyp_alpha_o(alpha_o), hyp_alpha_r(alpha_r), CRP_o(alpha_o), CRP_r(alpha_r) {
+CjCRP::CjCRP(double gamma, double alpha)
+    : hyp_gamma(gamma), hyp_alpha(alpha), CRP_o(alpha), CRP_r(alpha) {
     // Fill the list of context hypotheses based on the current state of the CRPs
     fill_context_hypotheses();
 }
