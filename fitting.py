@@ -5,7 +5,7 @@ The data are the observations o_{1:T} shown to the participant, the actions a_{1
 The participant is modelled as the ideal observer seeing o_t without sensory noise, which with a lapse rate ε chooses an action uniformly at random.
 
 Likelihood
-    The ideal observer is stochastic (particles sample latent states and contexts, and are resampled at random), so its internal state z_t is latent:
+    The ideal observer is stochastic (particles sample latent states and contexts, and are resampled), so its internal state z_t is latent:
 
         p(a_{1:T} | o, r, θ) = 𝔼_z[ Π_t p(a_t | z_t, θ) ],     p(a_t | z_t, θ) = (1 - ε) P_IO(a_t | z_t) + ε / n_actions
 
@@ -33,8 +33,8 @@ import numpy as np
 from scipy.special import expit, logit, logsumexp
 
 import utils_sample
-from subject import IdealObsParams
-from experiment import CombinedHistory, CPP_BACKEND_ERROR, make_subject
+from subject import Subject, IdealObsParams
+from experiment import ExperimentalEnv, ExperimentHistory, SubjectHistory, CombinedHistory, CPP_BACKEND_ERROR, make_subject
 
 
 # Transforms of a hyperparameter to its unconstrained scale, and back
@@ -167,6 +167,70 @@ class FitModel():
         """
         rng = np.random.default_rng(seed)
         return self.prior_loc + self.prior_scale * rng.standard_normal((n, self.d))
+
+
+# ----------------------------------------
+#   Simulated participants
+# ----------------------------------------
+
+class LapsingSubject(Subject):
+    """
+    A subject that, with probability lapse, takes a uniformly random action instead of the action selected by the wrapped subject,
+    so that it is a participant of the kind assumed by the likelihood
+    """
+    def __init__(self, subject: Subject, lapse: float, n_actions: int = 4):
+        self.subject = subject
+        self.lapse = lapse
+        self.n_actions = n_actions
+
+    def before_action(self, o_t: np.ndarray):
+        self.subject.before_action(o_t)
+
+    def select_action(self) -> int:
+        # The wrapped subject always selects an action, so that its random stream does not depend on the lapses
+        a_t = self.subject.select_action()
+        if utils_sample.rng.random() < self.lapse:
+            return int(utils_sample.rng.integers(self.n_actions))
+        return a_t
+
+    def after_action(self, o_t: np.ndarray, a_t: int, r_t: float):
+        self.subject.after_action(o_t, a_t, r_t)
+
+    @property
+    def p_action(self) -> np.ndarray:
+        return (1.0 - self.lapse) * np.asarray(self.subject.p_action) + self.lapse / self.n_actions
+
+
+def simulate(
+    model: "FitModel",
+    theta: np.ndarray,
+    env: ExperimentalEnv,
+    schedule: list[tuple[int, int, int]],
+    N: int,
+    seed: int | None = None,
+    backend: str = "cpp"
+    ) -> Dataset:
+    """
+    Dataset of a participant simulated from the model at θ, including lapses, e.g. for parameter recovery.
+
+    :param list schedule: blocks of trials, run in order, each of the form (n_trials, c_o, c_r), see experiment.run_replicate
+    :param int N: number of particles of the simulated participant's ideal observer
+    :param int seed: seed for the random number generators of the environment and of the participant. If None, they are seeded from fresh OS entropy.
+    """
+    # Independent random streams for the environment and the participant, as in experiment.run_replicate
+    env_seed, observer_seed = np.random.SeedSequence(seed).spawn(2)
+    env.seed(env_seed)
+    utils_sample.seed(observer_seed)
+
+    agent_params, lapse = model.agent_params(theta)
+    subject = LapsingSubject(make_subject(agent_params, N, backend), lapse, model.n_actions)
+
+    exp_history = ExperimentHistory()
+    sub_history = SubjectHistory()
+    for n_trials, c_o, c_r in schedule:
+        env.repeat_trials(subject, experiment_history=exp_history, subject_history=sub_history, N=n_trials, c_o=c_o, c_r=c_r)
+
+    return Dataset.from_history(CombinedHistory(experiment_history=exp_history, subject_history=sub_history))
 
 
 # ----------------------------------------
