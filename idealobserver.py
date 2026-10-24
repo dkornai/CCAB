@@ -4,16 +4,23 @@ import numpy as np
 
 from particle import Particle
 from subject import Subject, IdealObsParams
-from utils_sample import rng, bern_sample, cat_sample
+from utils_sample import rng, cat_sample
 
 
 class IdealObsPF(Subject):
     """
     Particle filtering implementation of the ideal observer.
     """
-    def __init__(self, N: int, hyp_params: IdealObsParams):
+    def __init__(self, N: int, hyp_params: IdealObsParams, ess_threshold: float = 0.5):
+        """
+        :param int N: number of particles
+        :param IdealObsParams hyp_params: parameters of the ideal observer
+        :param float ess_threshold: particles are resampled after a trial if the effective sample size falls below ess_threshold * N
+        """
+        assert 0.0 <= ess_threshold <= 1.0, "ess_threshold must be in [0, 1]"
         self.N = N
         self.hyp_params = hyp_params
+        self.ess_threshold = ess_threshold
 
         # Initialise the particles
         self.particles = [Particle(hyp_params) for _ in range(N)]
@@ -34,6 +41,13 @@ class IdealObsPF(Subject):
         max_log_weight = np.max(self.log_weights)
         logsumexp = max_log_weight + np.log(np.sum(np.exp(self.log_weights - max_log_weight)))
         return np.exp(self.log_weights - logsumexp)
+
+    @property
+    def ess(self) -> float:
+        """
+        Effective sample size of the particles, 1 / Σ_i w_i^2, between 1 and N
+        """
+        return float(1.0 / np.sum(self.weights**2))
 
     def before_action(self, o_t: np.ndarray):
         """
@@ -70,8 +84,8 @@ class IdealObsPF(Subject):
             self.vec_j_t[i]     = j_t
             self.log_weights[i] = float(particle.log_weight)
 
-        # Resample particles with a low probability to maintain diversity
-        if bern_sample(0.02) == 1.0:
+        # Resample particles when their weights have become uneven, to maintain diversity
+        if self.ess < self.ess_threshold * self.N:
             self.resample()
 
     def resample(self):

@@ -365,6 +365,29 @@ def test_ideal_observer_action_log_probs():
     assert_close(p_actions, expected, rtol=0, atol=0.01)
 
 
+@pytest.mark.parametrize("backend", ["python", "cpp"])
+def test_ideal_observer_ess_resampling(backend):
+    """After each trial the effective sample size is at least ess_threshold * N, as the particles are resampled whenever it falls below"""
+    from idealobserver import IdealObsPF
+    from idealobserver_cpp import IdealObsPFCpp
+
+    utils_sample.seed(13)
+    gen = np.random.default_rng(13)
+    N, threshold = 50, 0.5
+    agent = AGENTS["CjCRP_NIW_BB"]
+    pf = IdealObsPF(N, agent, ess_threshold=threshold) if backend == "python" else IdealObsPFCpp(N, agent, ess_threshold=threshold)
+
+    n_resampled = 0
+    for t in range(120):
+        o_t, a_opt = observation(t, gen)
+        pf.before_action(o_t)
+        a_t = pf.select_action()
+        pf.after_action(o_t, a_t, float(a_t == a_opt))
+        assert pf.ess >= threshold * N - 1e-9
+        n_resampled += int(np.all(pf.log_weights == 0.0))
+    assert n_resampled > 0
+
+
 def test_ideal_observer_resample():
     """After resampling, weights are reset and every particle is a copy of a particle from before resampling"""
     pf = run_cpp_pf(AGENTS["CjCRP_NIW_BB"])

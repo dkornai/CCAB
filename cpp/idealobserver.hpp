@@ -16,10 +16,14 @@ class IdealObsPF {
 public:
     /// The ensemble owns its random number generator, seeded with seed, which it passes to the particles.
     /// Differs from Python: Python uses the module-level generator utils_sample.rng, see utils_sample.hpp
-    IdealObsPF(int N, const IdealObsParams& hyp_params, std::uint64_t seed);
+    /// Particles are resampled after a trial if the effective sample size falls below ess_threshold * N
+    IdealObsPF(int N, const IdealObsParams& hyp_params, std::uint64_t seed, double ess_threshold = 0.5);
 
     /// Weights of each particle, summing to 1
     VectorXd weights() const;
+
+    /// Effective sample size of the particles, 1 / Σ_i w_i^2, between 1 and N
+    double ess() const;
 
     /// Process the incoming observation o_t
     void before_action(const VectorXd& o_t);
@@ -46,10 +50,8 @@ public:
     /// Probability of a jump at the current time step, weighted by particle weights (rounded to 2 decimals, as in Python)
     double p_jump() const;
 
-    /// Probability of resampling after each trial
-    static constexpr double resample_prob = 0.02;
-
     int N;
+    double ess_threshold;
     IdealObsParams hyp_params;
 
     std::vector<Particle> particles;

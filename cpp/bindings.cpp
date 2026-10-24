@@ -232,14 +232,16 @@ NB_MODULE(pf_cpp, m) {
     // ----------------------------------------
     // The methods that do the particle work release the GIL, as they do not touch Python objects
     nb::class_<pf::IdealObsPF>(m, "IdealObsPF")
-        .def(nb::init<int, const pf::IdealObsParams&, std::uint64_t>(), "N"_a, "hyp_params"_a, "seed"_a)
+        .def(nb::init<int, const pf::IdealObsParams&, std::uint64_t, double>(), "N"_a, "hyp_params"_a, "seed"_a, "ess_threshold"_a = 0.5)
         .def("before_action", &pf::IdealObsPF::before_action, "o_t"_a, nb::call_guard<nb::gil_scoped_release>())
         .def("select_action", &pf::IdealObsPF::select_action, nb::call_guard<nb::gil_scoped_release>())
         .def("action_log_probs", &pf::IdealObsPF::action_log_probs, "n_samples"_a = 1, nb::call_guard<nb::gil_scoped_release>())
         .def("after_action", &pf::IdealObsPF::after_action, "o_t"_a, "a_t"_a, "r_t"_a, nb::call_guard<nb::gil_scoped_release>())
         .def("resample", &pf::IdealObsPF::resample, nb::call_guard<nb::gil_scoped_release>())
         .def_ro("N", &pf::IdealObsPF::N)
+        .def_ro("ess_threshold", &pf::IdealObsPF::ess_threshold)
         .def_prop_ro("weights", &pf::IdealObsPF::weights)
+        .def_prop_ro("ess", &pf::IdealObsPF::ess)
         .def_prop_ro("p_action", &pf::IdealObsPF::p_action)
         .def_prop_ro("p_state", &pf::IdealObsPF::p_state)
         .def_prop_ro("p_jump", &pf::IdealObsPF::p_jump)

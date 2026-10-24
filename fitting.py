@@ -19,8 +19,7 @@ Metropolis-Hastings
     the standard deviation of the log-likelihood estimate (log_likelihood_sd) should be below ~1.5.
     The noise has two sources: the Thompson samples from which P_IO(a_t | z_t) is estimated (reduced by n_thompson), which matter most on trials
     where the participant chose an action the ideal observer finds unlikely (e.g. exploration), and the ideal observer's own trajectory z
-    (reduced by N, which also has occasional runs that lose track of the contexts at small N). Both need to be large enough:
-    increasing n_thompson does little while N is small.
+    (reduced by N). Both need to be large enough: increasing n_thompson does little while N is small.
 
     Parameters are sampled on an unconstrained scale (log or logit), with Normal priors on that scale.
     The random walk proposal is adapted during burn-in (shape to the covariance of the burn-in samples, scale to an acceptance rate of ~0.15),

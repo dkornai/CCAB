@@ -16,8 +16,9 @@ double round2(double x) {
 }  // namespace
 
 
-IdealObsPF::IdealObsPF(int N, const IdealObsParams& hyp_params, std::uint64_t seed)
+IdealObsPF::IdealObsPF(int N, const IdealObsParams& hyp_params, std::uint64_t seed, double ess_threshold)
     : N(N),
+      ess_threshold(ess_threshold),
       hyp_params(hyp_params),
       log_weights(VectorXd::Zero(N)),
       vec_s_t(Eigen::VectorXi::Zero(N)),
@@ -38,6 +39,10 @@ VectorXd IdealObsPF::weights() const {
     const double max_lw = log_weights.maxCoeff();
     const double logsumexp = max_lw + std::log((log_weights.array() - max_lw).exp().sum());
     return (log_weights.array() - logsumexp).exp();
+}
+
+double IdealObsPF::ess() const {
+    return 1.0 / weights().squaredNorm();
 }
 
 void IdealObsPF::before_action(const VectorXd& o_t) {
@@ -88,8 +93,8 @@ void IdealObsPF::after_action(const VectorXd& o_t, int a_t, double r_t) {
         log_weights[i] = particles[i].log_weight;
     }
 
-    // Resample particles with a low probability to maintain diversity
-    if (bern_sample(resample_prob, rng) == 1) {
+    // Resample particles when their weights have become uneven, to maintain diversity
+    if (ess() < ess_threshold * N) {
         resample();
     }
 }

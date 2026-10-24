@@ -39,18 +39,21 @@ class IdealObsPFCpp(Subject):
     """
     Particle filtering implementation of the ideal observer, running in C++.
     """
-    def __init__(self, N: int, hyp_params: IdealObsParams, seed: int | None = None):
+    def __init__(self, N: int, hyp_params: IdealObsParams, seed: int | None = None, ess_threshold: float = 0.5):
         """
         Differs from IdealObsPF: the C++ ensemble has its own random number generator, rather than using the one in utils_sample.
 
         :param int seed: seed for the C++ random number generator. If None, it is drawn from utils_sample.rng, so that seeding that generator makes runs reproducible.
+        :param float ess_threshold: particles are resampled after a trial if the effective sample size falls below ess_threshold * N
         """
+        assert 0.0 <= ess_threshold <= 1.0, "ess_threshold must be in [0, 1]"
         if seed is None:
             seed = int(rng.integers(0, 2**63 - 1))
 
         self.N = N
         self.hyp_params = hyp_params
-        self._pf = pf_cpp.IdealObsPF(N, to_cpp_params(hyp_params), seed)
+        self.ess_threshold = ess_threshold
+        self._pf = pf_cpp.IdealObsPF(N, to_cpp_params(hyp_params), seed, ess_threshold)
 
     def before_action(self, o_t: np.ndarray):
         """
@@ -86,6 +89,10 @@ class IdealObsPFCpp(Subject):
     @property
     def weights(self) -> np.ndarray:
         return self._pf.weights
+
+    @property
+    def ess(self) -> float:
+        return self._pf.ess
 
     @property
     def log_weights(self) -> np.ndarray:
