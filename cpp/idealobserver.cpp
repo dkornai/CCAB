@@ -58,6 +58,25 @@ int IdealObsPF::select_action() {
     return last_actions[selected_particle];
 }
 
+VectorXd IdealObsPF::action_log_probs(int n_samples) {
+    const VectorXd w = weights();  // [N], sums to 1
+
+    // Python: mean over samples of bincount(actions, weights=w, minlength=4)
+    VectorXd p_actions = VectorXd::Zero(4);
+    for (int k = 0; k < n_samples; ++k) {
+        for (int i = 0; i < N; ++i) {
+            const int a = particles[i].sample_action(rng);
+            if (a >= p_actions.size()) {
+                p_actions.conservativeResizeLike(VectorXd::Zero(a + 1));
+            }
+            p_actions[a] += w[i];
+        }
+    }
+
+    // actions sampled by no particle have log probability -inf
+    return (p_actions / n_samples).array().log();
+}
+
 void IdealObsPF::after_action(const VectorXd& o_t, int a_t, double r_t) {
     // Each particle conducts inference on the latent state and contexts, and updates internal parameters
     for (int i = 0; i < N; ++i) {

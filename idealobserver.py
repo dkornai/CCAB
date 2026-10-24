@@ -97,6 +97,23 @@ class IdealObsPF(Subject):
             particle.log_weight = 0.0
         self.log_weights[:] = 0.0
 
+    def action_log_probs(self, n_samples: int = 1) -> np.ndarray:
+        """
+        Log probabilities of each action at the current time step, estimated from n_samples Thompson samples per particle, weighted by particle weights. \\
+        Unlike p_action these are not rounded, so they can be used as the likelihood of a participant's choice.
+        More samples reduce the noise of the estimate, mostly for unlikely actions.
+        """
+        w = self.weights  # [N], sums to 1
+
+        p_actions = np.zeros(4)
+        for _ in range(n_samples):
+            actions = np.array([particle.sample_action() for particle in self.particles], dtype=int)
+            p_actions += np.bincount(actions, weights=w, minlength=4)
+        p_actions /= n_samples
+
+        with np.errstate(divide='ignore'): # actions sampled by no particle have log probability -inf
+            return np.log(p_actions)
+
     @property
     def p_action(self) -> np.ndarray:
         """

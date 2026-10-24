@@ -64,6 +64,12 @@ class IdealObsPFCpp(Subject):
         """
         return self._pf.select_action()
 
+    def action_log_probs(self, n_samples: int = 1) -> np.ndarray:
+        """
+        Log probabilities of each action at the current time step, estimated from n_samples Thompson samples per particle
+        """
+        return self._pf.action_log_probs(n_samples)
+
     def after_action(self, o_t: np.ndarray, a_t: int, r_t: float):
         """
         Process the resulting o_t, a_t, r_t emissions at time t

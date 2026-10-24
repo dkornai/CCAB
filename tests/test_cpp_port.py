@@ -346,6 +346,25 @@ def test_ideal_observer_summaries():
     assert_close(pf.p_jump, np.round(w[pf.vec_j_t == 1].sum(), 2), atol=1e-12)
 
 
+def test_ideal_observer_action_log_probs():
+    """action_log_probs estimates the weighted action probabilities from which select_action samples, as in Python's IdealObsPF"""
+    pf = run_cpp_pf(AGENTS["CjCRP_NIW_BB"])
+    o_t, _ = observation(120, np.random.default_rng(12))
+    pf.before_action(to_cpp_value(o_t))
+
+    n = 2000
+    w = pf.weights
+    expected = np.zeros(4)
+    for _ in range(n):
+        pf.select_action()
+        expected += np.bincount(pf.last_actions, weights=w, minlength=4)
+    expected /= n
+
+    p_actions = np.exp(pf.action_log_probs(n))
+    assert_close(p_actions.sum(), 1.0, atol=1e-9)
+    assert_close(p_actions, expected, rtol=0, atol=0.01)
+
+
 def test_ideal_observer_resample():
     """After resampling, weights are reset and every particle is a copy of a particle from before resampling"""
     pf = run_cpp_pf(AGENTS["CjCRP_NIW_BB"])

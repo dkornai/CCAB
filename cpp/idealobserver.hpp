@@ -27,6 +27,10 @@ public:
     /// Select an action a_t
     int select_action();
 
+    /// Log probabilities of each action at the current time step, estimated from n_samples Thompson samples per particle, weighted by particle weights.
+    /// Unlike p_action these are not rounded, so they can be used as the likelihood of a participant's choice.
+    VectorXd action_log_probs(int n_samples);
+
     /// Process the resulting o_t, a_t, r_t emissions at time t
     void after_action(const VectorXd& o_t, int a_t, double r_t);
 

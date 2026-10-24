@@ -38,6 +38,12 @@ class Subject():
         """
         pass
 
+    def action_log_probs(self, n_samples: int = 1):
+        """
+        This method should return the log probabilities of selecting each action at the current time step, without rounding, for use as a likelihood when fitting.
+        """
+        pass
+
 class IdealObsParams(TypedDict):
     """
     TypedDict for the parameters of a Bayesian ideal observer.

@@ -235,6 +235,7 @@ NB_MODULE(pf_cpp, m) {
         .def(nb::init<int, const pf::IdealObsParams&, std::uint64_t>(), "N"_a, "hyp_params"_a, "seed"_a)
         .def("before_action", &pf::IdealObsPF::before_action, "o_t"_a, nb::call_guard<nb::gil_scoped_release>())
         .def("select_action", &pf::IdealObsPF::select_action, nb::call_guard<nb::gil_scoped_release>())
+        .def("action_log_probs", &pf::IdealObsPF::action_log_probs, "n_samples"_a = 1, nb::call_guard<nb::gil_scoped_release>())
         .def("after_action", &pf::IdealObsPF::after_action, "o_t"_a, "a_t"_a, "r_t"_a, nb::call_guard<nb::gil_scoped_release>())
         .def("resample", &pf::IdealObsPF::resample, nb::call_guard<nb::gil_scoped_release>())
         .def_ro("N", &pf::IdealObsPF::N)

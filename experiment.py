@@ -319,6 +319,24 @@ class CombinedHistory():
         return self.subject_history.p_action[np.arange(n_steps), self.experiment_history.optimal_action]
 
 
+def make_subject(agent_params: dict, N: int, backend: str = "python") -> Subject:
+    """
+    Construct a freshly initialised ideal observer.
+
+    :param dict agent_params: parameters of the ideal observer (IdealObsParams)
+    :param int N: number of particles
+    :param str backend: implementation of the ideal observer, "python" (IdealObsPF) or "cpp" (IdealObsPFCpp)
+    """
+    if backend == "python":
+        return IdealObsPF(N=N, hyp_params=agent_params)
+    elif backend == "cpp":
+        if CPP_BACKEND_ERROR is not None:
+            raise RuntimeError(CPP_BACKEND_ERROR)
+        return IdealObsPFCpp(N=N, hyp_params=agent_params)
+    else:
+        raise ValueError(f"Unknown backend {backend}, must be 'python' or 'cpp'")
+
+
 def run_replicate(
     env: ExperimentalEnv,
     agent_params: dict,
@@ -347,14 +365,7 @@ def run_replicate(
 
     exp_history = ExperimentHistory()
     sub_history = IOPFSubjectHistory()
-    if backend == "python":
-        subject = IdealObsPF(N=N, hyp_params=agent_params)
-    elif backend == "cpp":
-        if CPP_BACKEND_ERROR is not None:
-            raise RuntimeError(CPP_BACKEND_ERROR)
-        subject = IdealObsPFCpp(N=N, hyp_params=agent_params)
-    else:
-        raise ValueError(f"Unknown backend {backend}, must be 'python' or 'cpp'")
+    subject = make_subject(agent_params, N, backend)
 
     for n_trials, c_o, c_r in schedule:
         env.repeat_trials(subject, experiment_history=exp_history, subject_history=sub_history, N=n_trials, c_o=c_o, c_r=c_r, print_level=print_level)
